@@ -65,4 +65,4 @@ npm start
 ```
 Requires Node.js. Everything runs locally and Electron is the only heavy dependency.
 
-Licensed under **no formal license yet** — all rights reserved for now. Code is here to read and poke at; ask before reusing it in your own thing.
+Licensed under the [PolyForm Noncommercial License](LICENSE.md) — copy it, fork it, build on it, but don't sell it. Want a commercial exception? Ask.
