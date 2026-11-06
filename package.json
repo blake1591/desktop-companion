@@ -1,0 +1,59 @@
+{
+  "name": "desktop-companion",
+  "version": "1.0.0",
+  "main": "main.js",
+  "description": "Ellie — an emo 2D desktop pet companion with memory, reminders, vision and voice.",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win",
+    "pack": "electron-builder --dir"
+  },
+  "build": {
+    "appId": "com.ellie.desktopcompanion",
+    "productName": "Ellie",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "main.js",
+      "index.html",
+      "renderer/**/*",
+      "package.json",
+      "!**/node_modules/whisper/**",
+      "build/icon.png",
+      "build/tray.png"
+    ],
+    "win": {
+      "icon": "build/icon.ico",
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "shortcutName": "Ellie"
+    },
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "blake1591",
+        "repo": "desktop-companion"
+      }
+    ]
+  },
+  "devDependencies": {
+    "electron": "^45.0.0",
+    "electron-builder": "^26.0.12",
+    "png-to-ico": "^3.0.2"
+  },
+  "dependencies": {
+    "electron-updater": "^6.6.2"
+  }
+}

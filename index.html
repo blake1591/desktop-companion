@@ -1,0 +1,552 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>ellie</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
+    html, body {
+      width: 100%; height: 100%;
+      background: transparent !important;
+      overflow: hidden;
+      font-family: "Segoe UI", sans-serif;
+    }
+    #app {
+      width: 100%; height: 100%;
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: flex-end;
+      padding-bottom: 20px;
+      position: relative;
+    }
+    #speech-bubble {
+      background: rgba(15, 18, 28, 0.92);
+      border: 1px solid rgba(155, 101, 255, 0.6);
+      color: #e0f7fc;
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.4;
+      max-width: 260px;
+      margin-bottom: 10px;
+      display: none;
+      word-wrap: break-word;
+      min-height: 40px;
+      box-shadow: 0 4px 18px rgba(120, 70, 230, 0.25);
+      transition: border-color 0.4s ease, box-shadow 0.4s ease;
+    }
+    #speech-bubble strong { color: #a2b5ff; font-weight: 600; }
+    #speech-bubble em { color: #d0d8ff; font-style: italic; }
+    #speech-bubble code {
+      background: rgba(155, 101, 255, 0.2);
+      color: #bfa8ff;
+      padding: 1px 5px;
+      border-radius: 4px;
+      font-family: "Consolas", monospace;
+      font-size: 12px;
+    }
+    #canvas {
+      width: 180px; height: 180px;
+      cursor: grab;
+    }
+    #canvas:active { cursor: grabbing; }
+
+    #input-container {
+      position: relative;
+      display: none;
+      flex-direction: row;
+      align-items: center;
+      margin-top: 10px;
+      width: 100%;
+      padding: 0 8px;
+      gap: 6px;
+    }
+    #input-box {
+      flex: 1 1 auto;
+      width: auto;
+      min-width: 0; padding: 8px 12px;
+      background: rgba(10, 12, 22, 0.95);
+      border: 1px solid rgba(155, 101, 255, 0.5);
+      border-radius: 20px;
+      color: #fff; font-size: 13px; outline: none;
+    }
+    #mic-btn {
+      flex: 0 0 auto;
+      width: 32px; height: 32px;
+      margin-left: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(155, 101, 255, 0.5);
+      background: rgba(10, 12, 22, 0.95);
+      color: #fff; font-size: 13px;
+      cursor: pointer;
+      outline: none;
+      /* flex-centering keeps the glyph dead-center in the circle */
+      display: flex; align-items: center; justify-content: center;
+      line-height: 1; padding: 0;
+    }
+    #mic-btn:hover { border-color: #9b65ff; }
+    #mic-btn:disabled { opacity: 0.5; cursor: wait; }
+    #snip-btn {
+      flex: 0 0 auto;
+      width: 32px; height: 32px;
+      margin-left: 0;
+      border-radius: 50%;
+      border: 1px solid rgba(155, 101, 255, 0.5);
+      background: rgba(10, 12, 22, 0.95);
+      color: #fff; font-size: 13px;
+      cursor: pointer;
+      outline: none;
+      display: flex; align-items: center; justify-content: center;
+      line-height: 1; padding: 0;
+    }
+    #snip-btn:hover { border-color: #9b65ff; }
+
+    /* Tucked mode — while she's hiding under the taskbar, the chat bar
+       floats at the top of the window instead (above her peeking head) */
+    #input-container.tucked {
+      position: absolute;
+      top: 6px;
+      left: 8px;
+      right: 8px;
+      margin-top: 0;
+      z-index: 20;
+    }
+
+    #settings-modal {
+      display: none;
+      position: absolute;
+      bottom: 60px;
+      width: 280px;
+      max-height: 285px;
+      overflow-y: auto;
+      background: rgba(12, 14, 28, 0.96);
+      border: 1px solid rgba(155, 101, 255, 0.6);
+      border-radius: 14px;
+      padding: 14px;
+      color: #e0f7fc;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.85);
+      z-index: 100;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(155, 101, 255, 0.45) transparent;
+    }
+    #settings-modal::-webkit-scrollbar { width: 7px; }
+    #settings-modal::-webkit-scrollbar-track { background: transparent; }
+    #settings-modal::-webkit-scrollbar-thumb {
+      background: rgba(155, 101, 255, 0.45);
+      border-radius: 4px;
+    }
+    #settings-modal::-webkit-scrollbar-thumb:hover { background: rgba(155, 101, 255, 0.7); }
+    #settings-modal h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #a2b5ff;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+    .field-group {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      margin-bottom: 10px;
+    }
+    .field-group label { font-size: 11px; color: #8ab4f8; font-weight: 600; }
+    .field-group input, .field-group select {
+      background: rgba(20, 24, 42, 0.9);
+      border: 1px solid rgba(155, 101, 255, 0.35);
+      color: #fff;
+      padding: 6px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+    }
+    .field-group input:focus, .field-group select:focus {
+      border-color: #9b65ff;
+    }
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 12px;
+    }
+    .modal-actions button {
+      padding: 6px 14px;
+      border-radius: 6px;
+      font-size: 12px;
+      cursor: pointer;
+      border: none;
+      font-weight: 600;
+    }
+    #save-btn { background: #9b65ff; color: #ffffff; }
+    #save-btn:hover { background: #b282ff; }
+    #cancel-btn { background: rgba(255, 255, 255, 0.1); color: #ccc; }
+    #cancel-btn:hover { background: rgba(255, 255, 255, 0.2); }
+    #wipe-btn { background: rgba(255, 70, 90, 0.15); color: #ff8b9b; }
+    #wipe-btn:hover { background: rgba(255, 70, 90, 0.3); }
+    #mem-btn { background: rgba(155, 101, 255, 0.15); color: #c7b7ff; }
+    #mem-btn:hover { background: rgba(155, 101, 255, 0.3); }
+
+    /* Memories panel — same bones as the settings modal */
+    #memory-modal {
+      display: none;
+      position: absolute;
+      bottom: 60px;
+      width: 280px;
+      max-height: 285px;
+      overflow-y: auto;
+      background: rgba(12, 14, 28, 0.96);
+      border: 1px solid rgba(155, 101, 255, 0.6);
+      border-radius: 14px;
+      padding: 14px;
+      color: #e0f7fc;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.85);
+      z-index: 100;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(155, 101, 255, 0.45) transparent;
+    }
+    #memory-modal::-webkit-scrollbar { width: 7px; }
+    #memory-modal::-webkit-scrollbar-track { background: transparent; }
+    #memory-modal::-webkit-scrollbar-thumb {
+      background: rgba(155, 101, 255, 0.45);
+      border-radius: 4px;
+    }
+    #memory-modal h3 {
+      font-size: 14px;
+      margin-bottom: 12px;
+      color: #a2b5ff;
+    }
+    .mem-row {
+      display: flex;
+      align-items: flex-start;
+      gap: 6px;
+      padding: 5px 2px;
+      border-bottom: 1px solid rgba(155, 101, 255, 0.12);
+      font-size: 12px;
+      line-height: 1.35;
+    }
+    .mem-row:last-of-type { border-bottom: none; }
+    .mem-row .mem-text {
+      flex: 1 1 auto;
+      min-width: 0;
+      word-wrap: break-word;
+      color: #dfe8ff;
+      padding: 2px 0;
+    }
+    .mem-row.is-pinned .mem-text { color: #ffe9a8; }
+    .mem-row input.mem-edit {
+      flex: 1 1 auto;
+      min-width: 0;
+      background: rgba(20, 24, 42, 0.9);
+      border: 1px solid rgba(155, 101, 255, 0.45);
+      color: #fff;
+      font-size: 12px;
+      padding: 3px 6px;
+      border-radius: 5px;
+      outline: none;
+      font-family: inherit;
+    }
+    .mem-star, .mem-del {
+      flex: 0 0 auto;
+      background: none;
+      border: none;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 2px 5px;
+      margin: -2px -3px 0 0;
+      line-height: 1.2;
+      outline: none;
+      color: #5d6488;
+    }
+    .mem-star.pinned { color: #ffd75e; text-shadow: 0 0 6px rgba(255, 215, 94, 0.5); }
+    .mem-star:hover, .mem-del:hover { filter: brightness(1.5); }
+    .mem-del { color: #b06a75; }
+    .mem-del:hover { color: #ff8b9b; }
+    .mem-empty {
+      font-size: 11px;
+      color: rgba(224, 247, 252, 0.45);
+      padding: 8px 2px;
+      text-align: center;
+    }
+    .mem-add-row { display: flex; gap: 6px; margin-top: 10px; }
+    .mem-add-row input {
+      flex: 1 1 auto;
+      min-width: 0;
+      background: rgba(20, 24, 42, 0.9);
+      border: 1px solid rgba(155, 101, 255, 0.35);
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 6px;
+      font-size: 12px;
+      outline: none;
+    }
+    .mem-add-row input:focus { border-color: #9b65ff; }
+    #mem-add-btn {
+      flex: 0 0 auto;
+      width: 28px;
+      border-radius: 6px;
+      border: 1px solid rgba(155, 101, 255, 0.5);
+      background: rgba(20, 24, 42, 0.9);
+      color: #bfa8ff;
+      font-size: 14px;
+      cursor: pointer;
+      outline: none;
+    }
+    #mem-add-btn:hover { background: rgba(155, 101, 255, 0.25); }
+    .settings-hint {
+      font-size: 10px;
+      color: rgba(224, 247, 252, 0.45);
+      line-height: 1.4;
+      margin-top: 10px;
+    }
+    /* Thought bubble — comic-panel asides; top/bottom set at show-time
+       from the live layout (below the speech bubble, above her head) */
+    #thought-bubble {
+      position: absolute;
+      left: 4px;
+      max-width: 128px;
+      width: max-content;
+      overflow: visible;
+      background: rgba(235, 236, 248, 0.97);
+      color: #23233c;
+      font-size: 10.5px;
+      line-height: 1.4;
+      padding: 8px 11px;
+      border-radius: 12px;
+      border: 1.5px solid rgba(155, 101, 255, 0.35);
+      opacity: 0;
+      visibility: hidden;
+      transition: opacity 0.45s ease, visibility 0.45s ease;
+      z-index: 60;
+      pointer-events: none;
+      word-wrap: break-word;
+      box-shadow: 0 6px 22px rgba(0, 0, 0, 0.35);
+    }
+    #thought-bubble.show {
+      opacity: 1;
+      visibility: visible;
+    }
+    #thought-bubble::before {
+      content: "";
+      position: absolute;
+      top: 45%;
+      right: -12px;
+      width: 9px;
+      height: 9px;
+      border-radius: 50%;
+      background: rgba(235, 236, 248, 0.94);
+    }
+    #thought-bubble::after {
+      content: "";
+      position: absolute;
+      top: 62%;
+      right: -22px;
+      width: 5px;
+      height: 5px;
+      border-radius: 50%;
+      background: rgba(235, 236, 248, 0.85);
+    }
+    /* Pending image attachments chip above the input bar */
+    #img-chip {
+      display: none;
+      position: absolute;
+      bottom: 44px;
+      left: 0;
+      background: rgba(20, 24, 42, 0.95);
+      border: 1px solid rgba(155, 101, 255, 0.5);
+      border-radius: 10px;
+      padding: 5px;
+      max-width: 150px;
+      z-index: 40;
+    }
+    #img-chip.active { display: block; }
+    #img-chip .thumb-wrap { position: relative; }
+    #img-chip img {
+      display: block;
+      width: 120px;
+      height: 68px;
+      object-fit: cover;
+      border-radius: 7px;
+    }
+    #img-chip .img-x {
+      position: absolute;
+      top: -7px;
+      right: -7px;
+      width: 17px;
+      height: 17px;
+      border-radius: 50%;
+      border: none;
+      background: rgba(255, 70, 90, 0.85);
+      color: #fff;
+      font-size: 10px;
+      line-height: 17px;
+      cursor: pointer;
+      padding: 0;
+    }
+    #img-chip .img-label {
+      font-size: 9px;
+      color: rgba(224, 247, 252, 0.65);
+      margin-top: 3px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+    #mic-btn:hover, #snip-btn:hover { filter: brightness(1.3); }
+    #mic-btn.recording {
+      color: #ff5a7a;
+      border-color: rgba(255, 90, 122, 0.9);
+      animation: mic-pulse 1.1s infinite;
+    }
+    @keyframes mic-pulse {
+      0%, 100% { box-shadow: 0 0 2px rgba(255, 90, 122, 0.5); }
+      50% { box-shadow: 0 0 12px rgba(255, 90, 122, 0.85); }
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <div id="speech-bubble">hey... i am ellie.</div>
+    
+    <div id="settings-modal">
+      <h3>⚙️ Ellie Configuration</h3>
+      <div class="field-group">
+        <label>ACTIVE PROVIDER</label>
+        <select id="cfg-provider">
+          <option value="openrouter">OpenRouter (Cloud)</option>
+          <option value="lmstudio">LM Studio (Local)</option>
+        </select>
+      </div>
+
+      <div id="section-openrouter">
+        <div class="field-group">
+          <label>OPENROUTER API KEY</label>
+          <input type="password" id="cfg-or-key" placeholder="sk-or-v1-..." />
+        </div>
+        <div class="field-group">
+          <label>MODEL NAME</label>
+          <input type="text" id="cfg-or-model" placeholder="anthropic/claude-3.5-sonnet" />
+        </div>
+        <div class="settings-hint" style="margin-top: 0;">Leave the key blank to keep the stored one. Type "clear" to remove it from Ellie.</div>
+      </div>
+
+      <div id="section-lmstudio" style="display: none;">
+        <div class="field-group">
+          <label>LM STUDIO ENDPOINT</label>
+          <input type="text" id="cfg-lms-endpoint" placeholder="http://127.0.0.1:1234/v1/chat/completions" />
+        </div>
+        <div class="field-group">
+          <label>MODEL NAME</label>
+          <input type="text" id="cfg-lms-model" placeholder="mistralai/ministral-3-3b" />
+        </div>
+      </div>
+
+      <div class="field-group">
+        <label>IDLE CHATTER</label>
+        <select id="cfg-chatter">
+          <option value="quiet">Quiet (every 8–15 min)</option>
+          <option value="normal">Normal (every 3–6 min)</option>
+          <option value="chatty">Chatty (every 1–3 min)</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label>SPEAK REPLIES ALOUD (TTS)</label>
+        <select id="cfg-voice">
+          <option value="off">Off</option>
+          <option value="on">On</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label>SUMMON HOTKEY (works from anywhere on your pc)</label>
+        <input type="text" id="cfg-summon-hotkey" placeholder="Control+Alt+E" />
+      </div>
+
+      <div class="field-group">
+        <label>VISION MODEL (optional override — your chat model sees images by default)</label>
+        <input type="text" id="cfg-vision-model" placeholder="empty = use your chat model for images" />
+      </div>
+
+      <div class="field-group">
+        <label>COMPUTER CONTROL (she can click/type for you — off by default)</label>
+        <select id="cfg-pc">
+          <option value="off">Off — she never touches your pc</option>
+          <option value="on">On — ask her to do things ("open spotify and play deftones")</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label>COMPUTER TASK STEP CAP (she stops and asks before going further)</label>
+        <input type="number" id="cfg-pc-steps" min="1" max="50" placeholder="10" />
+      </div>
+
+      <div class="field-group">
+        <label>SLEEP SCHEDULE (she tucks under the taskbar and sleeps through the night)</label>
+        <select id="cfg-sleep-schedule">
+          <option value="off">Off — she only dozes off when you walk away</option>
+          <option value="on">On — she has a bedtime and a morning</option>
+        </select>
+      </div>
+
+      <div class="field-group">
+        <label>BEDTIME</label>
+        <input type="time" id="cfg-bedtime" />
+      </div>
+
+      <div class="field-group">
+        <label>WAKE UP</label>
+        <input type="time" id="cfg-wake-time" />
+      </div>
+
+      <div class="modal-actions">
+        <button id="wipe-btn">🧠 Clear Memory</button>
+        <button id="mem-btn">🗂️ Memories</button>
+        <button id="cancel-btn">Cancel</button>
+        <button id="save-btn">Save Settings</button>
+      </div>
+
+      <div class="settings-hint">
+        Try: "remind me in 20 minutes to stretch" · "list reminders" · "start pomodoro" · "remember that I'm a night owl" · "what do you remember" · "forget that" · "wear headphones" / "wear beanie" / "wear sunglasses" · "voice on" · Ctrl+Alt+E summons her from anywhere (also force-stops a pc task mid-run) · "use the pc: open calculator" · paste or drop an image, or hit ✂ to snip a piece of your screen and ask about it · double-click me to pet 🖤
+      </div>
+    </div>
+
+    <div id="memory-modal">
+      <h3>🗂️ what ellie remembers</h3>
+      <div id="memory-list"></div>
+      <div class="mem-add-row">
+        <input type="text" id="mem-add-input" placeholder="remember something new..." maxlength="200" />
+        <button id="mem-add-btn">＋</button>
+      </div>
+      <div class="modal-actions">
+        <button id="mem-close-btn">Close</button>
+      </div>
+      <div class="settings-hint">★ = pinned — she treats these as core facts and they're saved when her memory overflows.</div>
+    </div>
+
+    <canvas id="canvas" width="180" height="180"></canvas>
+
+    <div id="thought-bubble"></div>
+    
+    <div id="input-container">
+      <div id="img-chip">
+        <div class="thumb-wrap">
+          <img id="img-chip-img" alt="" />
+          <button id="img-chip-x" class="img-x" title="remove">✕</button>
+        </div>
+        <div class="img-label" id="img-chip-label"></div>
+      </div>
+      <input type="text" id="input-box" placeholder="Talk to Ellie..." />
+      <button id="snip-btn" title="Snip: drag a region, it attaches here — caption it or send it bare">✂</button>
+      <button id="mic-btn" title="Push-to-talk: click to record, click again to transcribe (offline whisper)">🎤&#xFE0E;</button>
+    </div>
+  </div>
+
+  <script src="renderer/config.js"></script>
+  <script src="renderer/state.js"></script>
+  <script src="renderer/memory.js"></script>
+  <script src="renderer/audio.js"></script>
+  <script src="renderer/orb.js"></script>
+  <script src="renderer/llm.js"></script>
+  <script src="renderer/assistant.js"></script>
+  <script src="renderer/ui.js"></script>
+  <script src="renderer/main.js"></script>
+</body>
+</html>
