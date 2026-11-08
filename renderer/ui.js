@@ -615,6 +615,12 @@ const UI = (() => {
       return true;
     }
 
+    // She knows her own version now
+    if (/^(what|which) version (are you|of you|am i (?:on|running))\??$|^what version\??$|^my version\??$|^version\??$/.test(lower)) {
+      say(`ellie ${currentVersion || "?"}. the newest her there is.`, { mood: "idle", holdMs: 7000, speak: true });
+      return true;
+    }
+
     // "check for updates" — the tray button's twin, in chat. Explicit
     // ask overrides a dismissed panel and forces it back open when
     // there's news.
@@ -1307,17 +1313,24 @@ const UI = (() => {
   // Main broadcasts "ui:update"; the panel walks through available →
   // downloading → downloaded, and the button does the rest. "Later"
   // just tucks the panel away until her next look at GitHub.
+  // Announcements key off the VERSION, not "first call": at startup the
+  // status poll sets updateData before any event can fire, so a
+  // "first call" test never fires — that's the silent-1.1.0-updater bug.
   const updateModal = document.getElementById("update-modal");
   const updateNotes = document.getElementById("update-notes");
   const updateStatus = document.getElementById("update-status");
   const updateBtn = document.getElementById("update-btn");
   const updateLaterBtn = document.getElementById("update-later-btn");
+  const updateVersionLine = document.getElementById("updater-version-line");
   let updateData = null;
   let updateDismissed = false;
+  let currentVersion = null;
+  let lastAnnouncedVersion = null;
 
   function applyUpdateState(u, forceShow = false) {
     if (!updateModal || !u || !u.supported) return;
-    const first = !!forceShow || !updateData;
+    if (u.current) currentVersion = u.current;
+    renderVersionLine();
     updateData = u;
     if (updateDismissed && (u.downloaded || u.error)) updateDismissed = false; // these come with news
 
@@ -1339,14 +1352,23 @@ const UI = (() => {
       u.downloading ? "Downloading..." : "Download & Install";
     updateBtn.disabled = !!u.downloading;
 
-    if (first || u.downloaded) {
+    // Announce a version she hasn't announced yet — not "first call".
+    const fresh = String(u.version || "") !== String(lastAnnouncedVersion || "");
+    if (fresh) lastAnnouncedVersion = u.version;
+
+    if (forceShow || u.downloaded || fresh) {
       showUpdatePanel(u);
       // forceShow comes from an explicit "check for updates" — the
       // chat command already said its own line, so no double-speak
-      if (first && !u.downloading && !forceShow) {
+      if (fresh && !u.downloading && !forceShow) {
         say(`heads up — ellie ${u.version} is out. changelog's in the panel. 🖤`, { mood: "thinking", holdMs: 9000 });
       }
     }
+  }
+
+  function renderVersionLine() {
+    if (!updateVersionLine) return;
+    updateVersionLine.textContent = "currently running ellie " + (currentVersion || "?");
   }
 
   function showUpdatePanel(u) {
@@ -1382,7 +1404,11 @@ const UI = (() => {
   });
 
   ipcRenderer.on("ui:update", (_e, u) => applyUpdateState(u));
-  ipcRenderer.invoke("updater:status").then(u => applyUpdateState(u)).catch(() => {});
+  ipcRenderer.invoke("updater:status").then(u => {
+    currentVersion = u && u.current ? u.current : currentVersion;
+    renderVersionLine();
+    applyUpdateState(u);
+  }).catch(() => {});
 
   // Letter from home — a message blake wrote into the repo shows up in
   // her voice, once, then never again. Delivered by main (it fetched

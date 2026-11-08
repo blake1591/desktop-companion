@@ -1508,16 +1508,16 @@ ipcMain.handle("app:exit", async () => {
 // download, and triggers the restart-and-apply. All guarded on
 // `supported` so a dev run can never self-update.
 // ============================================================
-ipcMain.handle("updater:status", async () => ({ ...updateState }));
+ipcMain.handle("updater:status", async () => ({ ...updateState, current: app.getVersion() }));
 
 // Explicit check (tray button and the "check for updates" chat
 // command). Awaits the check so the caller gets fresh state —
 // broadcasts update the panel meanwhile, as usual.
 ipcMain.handle("updater:check", async () => {
-  if (!app.isPackaged) return { ...updateState };
+  if (!app.isPackaged) return { ...updateState, current: app.getVersion() };
   try { await autoUpdater.checkForUpdates(); }
   catch (e) { updateState.error = e.message; console.log("[updater] manual chat check failed:", e.message); }
-  return { ...updateState };
+  return { ...updateState, current: app.getVersion() };
 });
 
 ipcMain.handle("updater:download", async () => {
@@ -1596,6 +1596,22 @@ function setupUpdater() {
   autoUpdater.autoDownload = false;             // the renderer's panel owns the button
   autoUpdater.autoInstallOnAppQuit = true;      // ...and even if she never notices, a quit applies it
 
+  // File log so her updater is never mysterious again: every check,
+  // result and failure lands in %APPDATA%\desktop-companion\updater.log
+  const appendUpdLog = (level, args) => {
+    try {
+      const text = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
+      fs.appendFileSync(path.join(app.getPath("userData"), "updater.log"),
+        `[${new Date().toISOString()}] [${level}] ${text}\n`);
+    } catch (e) {}
+  };
+  autoUpdater.logger = {
+    info: (...args) => { console.log("[updater]", ...args); appendUpdLog("info", args); },
+    warn: (...args) => { console.log("[updater] WARN", ...args); appendUpdLog("warn", args); },
+    error: (...args) => { console.log("[updater] ERROR", ...args); appendUpdLog("error", args); },
+    debug: (...args) => { appendUpdLog("debug", args); }
+  };
+
   autoUpdater.on("checking-for-update", () => console.log("[updater] checking…"));
   autoUpdater.on("update-available", (info) => {
     console.log("[updater] update available:", info.version);
@@ -1651,7 +1667,7 @@ function createTray() {
   let icon = nativeImage.createFromPath(path.join(__dirname, "build", "tray.png")).resize({ width: 16, height: 16 });
   if (icon.isEmpty()) icon = nativeImage.createFromDataURL(TRAY_ICON_DATA);
   tray = new Tray(icon);
-  tray.setToolTip("Ellie Desktop Companion");
+  tray.setToolTip(`Ellie Desktop Companion v${app.getVersion()}`);
 
   const contextMenu = Menu.buildFromTemplate([
     {

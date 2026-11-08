@@ -2,6 +2,13 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
+## [1.2.1] — 2026-11-08
+
+### Fixes
+- The update notice used to stay completely silent in 1.1.0 even when a check found a new version. She now actually announces the update. This means for this version, you must update manually.
+- Updater keeps a log file now, at %APPDATA%\desktop-companion\updater.log.
+- She shows her version now: a line in the update panel ("currently running ellie x.y.z") and the tray tooltip includes it too.
+
 ## [1.2.0] — 2026-11-08
 
 ### Search
