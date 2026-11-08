@@ -2,9 +2,20 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
-## [1.1.0] — 2026-11-07
+## [1.2.0] — 2026-11-08
+
+### Search
+- Ellie can search the web now. "search the web for...", "look up..." or "google..." gives her a direct order, and when she just doesn't know something she looks it up instead of making it up, then answers with what she found on the pages. It's uses a plain DuckDuckGo fetch.
+
+### Announcements
+- Messages can go out between releases now. A small json file in the repo, fetched alongside her update checks, and then spoken once by her.
 
 ### Updates
+- "Check for updates" now works from chat too, and a direct ask brings the panel back even if you'd dismissed it.
+
+## [1.1.0] — 2026-11-07
+
+### Updater
 - Built-in updater: Checks GitHub Releases on launch (and every 6 hours after). When a new version is out she says so, shows the changelog in a small panel, and one button downloads it and restarts her into the new version
 - A quit applies the update too, so even if you never open the panel she's on the current version
 
@@ -12,11 +23,9 @@ All notable changes to Ellie. Dates in YYYY-MM-DD.
 - "goodnight", "go to bed", or "leave me alone" and she says bye and closes herself. Exact phrases are a deterministic command with no model in the middle, and natural phrasing works too through the model
 - Mid-task she refuses politely instead: say "stop" first, then she'll go
 
-### Vision
-- Fixed: You can now drag and drop images into her chat to attach them to your messages. This was an intended feature for 1.0.0, but it was bugged.
-
 ### Fixes
-- Ctrl+Alt+E used to fly her back to a stale spot for no visible reason. Dragging her never updated her own position memory, so the summon glided from wherever she last placed herself, sometimes minutes ago. She now always knows where she actually is, and summon lands at your spot first before she climbs up to stand on the taskbar
+- Summoning puts Ellie in the correct position unlike a bug preventing her to do so found in 1.0.0.
+- You can now drag and drop images into her chat to attach them to your messages. This was an intended feature for 1.0.0, but it was bugged.
 
 ## [1.0.0] — 2026-11-05
 

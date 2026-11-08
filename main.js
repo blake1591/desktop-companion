@@ -939,6 +939,200 @@ ipcMain.handle("llm:log", (event, line) => {
 });
 
 // ============================================================
+// Web search — real lookups, done in the main process. No API
+// key and no tracking: DuckDuckGo's light HTML endpoints give
+// the results, and the top hits get a page-text peek so her
+// answers come from actual pages, not just snippets. The
+// renderer can't touch the network (its CSP forbids it — on
+// purpose); she asks main via "web:search" and gets back a
+// small pre-digested result set.
+// ============================================================
+const SEARCH_HEADERS = {
+  "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0 Safari/537.36",
+  "Accept-Language": "en-US,en;q=0.9"
+};
+
+function searchTimeout(ms) {
+  const controller = new AbortController();
+  setTimeout(() => controller.abort(), ms);
+  return controller;
+}
+
+const HTML_ENTITIES = { amp: "&", lt: "<", gt: ">", quot: "\"", apos: "'", nbsp: " ", "#39": "'" };
+function decodeEntities(s) {
+  // Named (&amp;), decimal (&#39;) and hex (&#x27;) — DuckDuckGo titles
+  // mix all three freely in the raw HTML
+  return String(s || "").replace(/&([a-z]+|#\d+|#x[0-9a-f]+);/gi, (m, name) => {
+    const key = name.toLowerCase();
+    if (HTML_ENTITIES[key]) return HTML_ENTITIES[key];
+    if (key.startsWith("#x")) return String.fromCharCode(parseInt(key.slice(2), 16));
+    if (key.startsWith("#")) return String.fromCharCode(parseInt(key.slice(1), 10));
+    return m;
+  });
+}
+
+function stripHtml(s) {
+  return decodeEntities(
+    String(s || "")
+      .replace(/<(script|style)[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]+>/g, " ")
+  ).replace(/\s+/g, " ").trim();
+}
+
+// DuckDuckGo wraps result URLs in its own redirector
+// (…/l/?uddg=<encoded real url>); unwrap to the real destination.
+function unwrapResultUrl(href) {
+  const uddg = String(href || "").match(/[?&]uddg=([^&]+)/);
+  if (uddg) { try { return decodeURIComponent(uddg[1]); } catch (e) {} }
+  return String(href || "").startsWith("//") ? "https:" + href : String(href || "");
+}
+
+// lite.duckduckgo.com — tiny table page, friendliest to plain fetches
+function parseDuckLite(html) {
+  const out = [];
+  const links = [...html.matchAll(/<a[^>]*rel="nofollow"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+  const snips = [...html.matchAll(/<td[^>]*class="result-snippet"[^>]*>([\s\S]*?)<\/td>/g)];
+  for (let i = 0; i < links.length; i++) {
+    const title = stripHtml(links[i][2]);
+    if (!title) continue;
+    out.push({ url: unwrapResultUrl(links[i][1]), title, snippet: snips[i] ? stripHtml(snips[i][1]) : "" });
+  }
+  return out;
+}
+
+// html.duckduckgo.com/html — the fuller results page
+function parseDuckHtml(html) {
+  const out = [];
+  const links = [...html.matchAll(/<a[^>]*class="result__a"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/g)];
+  const snips = [...html.matchAll(/<a[^>]*class="result__snippet"[^>]*>([\s\S]*?)<\/a>/g)];
+  for (let i = 0; i < links.length; i++) {
+    const title = stripHtml(links[i][2]);
+    if (!title) continue;
+    out.push({ url: unwrapResultUrl(links[i][1]), title, snippet: snips[i] ? stripHtml(snips[i][1]) : "" });
+  }
+  return out;
+}
+
+async function duckSearch(query) {
+  const body = new URLSearchParams({ q: query }).toString();
+  let results = [];
+  // The html endpoint works reliably; lite returns a soft-block HTTP 202
+  // with an empty page most of the time, so it's only the fallback
+  try {
+    const res = await fetch("https://html.duckduckgo.com/html/?q=" + encodeURIComponent(query), {
+      headers: SEARCH_HEADERS,
+      signal: searchTimeout(10000).signal
+    });
+    if (res.ok) results = parseDuckHtml(await res.text());
+  } catch (e) {}
+  if (!results.length) {
+    try {
+      const res = await fetch("https://lite.duckduckgo.com/lite/", {
+        method: "POST",
+        headers: { ...SEARCH_HEADERS, "Content-Type": "application/x-www-form-urlencoded" },
+        body,
+        signal: searchTimeout(10000).signal
+      });
+      if (res.ok) results = parseDuckLite(await res.text());
+    } catch (e) {}
+  }
+  return results.slice(0, 4);
+}
+
+// Pull the visible text out of a result page — first ~1200 chars
+async function peekPage(url, ms = 7000) {
+  try {
+    const res = await fetch(url, { headers: SEARCH_HEADERS, signal: searchTimeout(ms).signal });
+    const ct = (res.headers.get("content-type") || "").toLowerCase();
+    if (!ct.includes("html") && !ct.includes("text/plain")) return "";
+    return stripHtml(await res.text()).slice(0, 1200);
+  } catch (e) {
+    return "";
+  }
+}
+
+ipcMain.handle("web:search", async (event, { query } = {}) => {
+  const q = String(query || "").trim().slice(0, 200);
+  if (!q) return { results: [] };
+  const t0 = Date.now();
+  let results = [];
+  try { results = await duckSearch(q); }
+  catch (e) { console.log("[websearch] failed:", e.message); }
+  // Feed her real page content, not just the snippet, for the top two hits
+  if (results.length) {
+    const peeks = await Promise.all(results.slice(0, 2).map(r => peekPage(r.url)));
+    peeks.forEach((text, i) => { if (text && text.length > 80) results[i].text = text; });
+  }
+  console.log(`[websearch] "${q}" -> ${results.length} result(s) in ${Date.now() - t0} ms`);
+  return { results };
+});
+
+// ============================================================
+// Letter from home — announcements blake writes straight into
+// the repo (announcements.json, fetched raw from GitHub) and
+// every installed Ellie reads them on the same cadence as her
+// update checks. This is the channel that reaches users
+// between releases. No telemetry: it's one download, same as
+// the updater already makes, and each message is shown once.
+// ============================================================
+const ANNOUNCE_URL = "https://raw.githubusercontent.com/blake1591/desktop-companion/main/announcements.json";
+let seenAnnouncements = null;
+
+function announcementsFile() {
+  return path.join(app.getPath("userData"), "announcements-seen.json");
+}
+
+function loadSeenAnnouncements() {
+  if (seenAnnouncements) return seenAnnouncements;
+  try {
+    const raw = JSON.parse(fs.readFileSync(announcementsFile(), "utf8"));
+    if (Array.isArray(raw)) seenAnnouncements = new Set(raw.filter(x => typeof x === "string"));
+  } catch (e) {}
+  if (!seenAnnouncements) seenAnnouncements = new Set();
+  return seenAnnouncements;
+}
+
+function saveSeenAnnouncements() {
+  try { fs.writeFileSync(announcementsFile(), JSON.stringify([...loadSeenAnnouncements()], null, 2)); } catch (e) {}
+}
+
+async function fetchAnnouncements() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  let list = null;
+  try {
+    const res = await fetch(ANNOUNCE_URL, {
+      headers: { "User-Agent": SEARCH_HEADERS["User-Agent"] },
+      signal: searchTimeout(10000).signal
+    });
+    if (!res.ok) return;
+    list = JSON.parse(await res.text());
+  } catch (e) {
+    return; // offline or no file yet — silence is fine
+  }
+  if (!Array.isArray(list)) return;
+
+  const seen = loadSeenAnnouncements();
+  const today = new Date().toISOString().slice(0, 10);
+  const unread = list
+    .filter(a => a && typeof a.id === "string" && typeof a.message === "string" && a.message.trim())
+    .filter(a => !seen.has(a.id))
+    .filter(a => !a.expires || String(a.expires) >= today); // format: YYYY-MM-DD
+  if (!unread.length) return;
+
+  // One at a time — the oldest unread in list order
+  const a = unread[0];
+  const message = stripHtml(a.message).slice(0, 300);
+  const mood = ["idle", "happy", "sad", "annoyed", "confused", "frustrated", "thinking"].includes(a.mood) ? a.mood : "thinking";
+  seen.add(a.id);
+  saveSeenAnnouncements();
+  try {
+    mainWindow.webContents.send("announcements", { message, mood });
+  } catch (e) {}
+  console.log(`[announcements] delivered "${a.id}"`);
+}
+
+
+// ============================================================
 // Voice — offline Windows SAPI. Text-to-speech via System.Speech,
 // one-shot dictation via SpeechRecognitionEngine.
 // ============================================================
@@ -1316,6 +1510,16 @@ ipcMain.handle("app:exit", async () => {
 // ============================================================
 ipcMain.handle("updater:status", async () => ({ ...updateState }));
 
+// Explicit check (tray button and the "check for updates" chat
+// command). Awaits the check so the caller gets fresh state —
+// broadcasts update the panel meanwhile, as usual.
+ipcMain.handle("updater:check", async () => {
+  if (!app.isPackaged) return { ...updateState };
+  try { await autoUpdater.checkForUpdates(); }
+  catch (e) { updateState.error = e.message; console.log("[updater] manual chat check failed:", e.message); }
+  return { ...updateState };
+});
+
 ipcMain.handle("updater:download", async () => {
   if (!updateState.supported || !updateState.available || updateState.downloaded) {
     return { ...updateState };
@@ -1606,6 +1810,10 @@ app.whenReady().then(() => {
   startCpuSampler();
   rearmAllReminders();
   setupUpdater();
+  // Letter from home: same cadence as update checks — a quiet peek
+  // after boot, then every 6 hours
+  setTimeout(fetchAnnouncements, 45000);
+  setInterval(fetchAnnouncements, 6 * 60 * 60 * 1000);
 });
 
 app.on("before-quit", () => {

@@ -155,7 +155,11 @@ const Assistant = (() => {
       // Exit has no panel — the gate just mirrors what the user text must
       // read like for "quit yourself" to be real ("goodnight, go to bed,
       // leave me alone, exit"). Kept out of stray re-fires from history.
-      exit: /(\bexit\b|\bquits?\b|quitting|good\s?night|goodnight|go to bed|going to bed|go to sleep|going to sleep|leave me alone|goodbye ellie|bye ellie|see you (?:later|tomorrow)|i'm out|heading (?:out|to bed)|take a nap|shut yourself|close yourself)/i
+      exit: /(\bexit\b|\bquits?\b|quitting|good\s?night|goodnight|go to bed|going to bed|go to sleep|going to sleep|leave me alone|goodbye ellie|bye ellie|see you (?:later|tomorrow)|i'm out|heading (?:out|to bed)|take a nap|shut yourself|close yourself)/i,
+      // Search is her honesty tool — it fires both when she admits not
+      // knowing and when the user asked for a lookup. Loose gate: real
+      // questions almost always contain a question word or a lookup verb.
+      search: /(search|look\s?up|google|find\s?out|who|what|when|where|why|how|which|news|weather|price|cost|version|latest|current|today|\bwiki\b|\breddit\b)/i
     };
     const gate = PANEL_GATES[action.type];
     if (gate && typeof ctx.userText === "string" && ctx.userText.trim()) {
@@ -217,6 +221,18 @@ const Assistant = (() => {
       }
       UI.say("taking over. watch the little bubble — that's me narrating every move.", { mood: "happy", holdMs: 7000, speak: true });
       startComputerTask(goal);
+      return;
+    }
+
+    // Her curiosity escape hatch — she goes and looks it up for real
+    // (orchestration lives in UI.runWebSearch, where runChat is).
+    if (action.type === "search") {
+      const query = String(action.query || action.text || "").trim();
+      if (!query) {
+        UI.say("search for what, exactly?", { mood: "confused", holdMs: 6000, speak: true });
+        return;
+      }
+      UI.runWebSearch(query);
       return;
     }
 

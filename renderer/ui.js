@@ -587,6 +587,21 @@ const UI = (() => {
       return true;
     }
 
+    // "search the web for X" / "look up X" / "google X" — direct requests,
+    // no model in the middle for deciding (the answer itself still goes
+    // through her voice). Sits before the looser includes-based commands
+    // below so a search ABOUT e.g. pomodoro reaches the search, not the timer.
+    const searchMatch = lower.match(/^(?:search(?:\s+the\s+(?:web|internet))?(?:\s+for)?|look\s?up|google|web\s?search)\b[:,]?\s*(.+)$/);
+    if (searchMatch) {
+      const query = searchMatch[1].trim().replace(/[??.!]+$/, "");
+      if (!query) {
+        say("look up what, exactly? give me a topic.", { mood: "confused", holdMs: 7000 });
+        return true;
+      }
+      runWebSearch(query);
+      return true;
+    }
+
     // Exit tool: "goodnight" / "go to bed" / "leave me alone" — exact
     // phrases, deterministic, no model in the middle. She says bye and
     // closes herself (Assistant.exitNow shouts if she's mid-task).
@@ -597,6 +612,32 @@ const UI = (() => {
 
     if (lower === "settings" || lower === "open settings" || lower.includes("open settings") || lower.includes("show settings")) {
       openSettingsPanel();
+      return true;
+    }
+
+    // "check for updates" — the tray button's twin, in chat. Explicit
+    // ask overrides a dismissed panel and forces it back open when
+    // there's news.
+    if (/^(check for updates|check updates|any new updates|any updates|are you up to date)\??$/.test(lower)) {
+      const st = await ipcRenderer.invoke("updater:check");
+      if (!st) {
+        say("update check failed. even the sky guvnor is offline, apparently.", { mood: "confused", holdMs: 7000 });
+      } else if (!st.supported) {
+        say("you're running me from source — dev copies don't update themselves. the installed one checks on her own. 🖤", { mood: "idle", holdMs: 9000 });
+      } else if (st.downloaded) {
+        say("update's already downloaded — the panel has the restart button.", { mood: "happy", holdMs: 9000 });
+        applyUpdateState(st, true);
+      } else if (st.downloading) {
+        say("one's coming down right now — " + (st.progress || 0) + "%.", { mood: "thinking", holdMs: 7000 });
+      } else if (st.available) {
+        updateDismissed = false;
+        say(`ellie ${st.version} is out — the panel's up. 🖤`, { mood: "thinking", holdMs: 9000 });
+        applyUpdateState(st, true);
+      } else if (st.error) {
+        say("check fell over: " + st.error, { mood: "confused", holdMs: 8000 });
+      } else {
+        say("she's current. newest version, same old me. 🖤", { mood: "idle", holdMs: 8000, speak: true });
+      }
       return true;
     }
 
@@ -854,18 +895,24 @@ const UI = (() => {
   }
 
   async function runChat(text, opts = {}) {
+    // A fresh message from the actual user resets her search streak
+    if (!opts.auto) searchChain = 0;
+
     // Attachments made since the last message ride along
     let images = opts.images ? [...opts.images] : [...pendingImages];
     clearPendingImages();
 
     // "look at my screen" style asks: grab the screenshot on the spot
-    if (images.length === 0 && !opts.noAutoShot && wantsScreenshot(text.toLowerCase())) {
+    if (images.length === 0 && !opts.auto && !opts.noAutoShot && wantsScreenshot(text.toLowerCase())) {
       try {
         images = [await ipcRenderer.invoke("vision:grab-screen")];
       } catch (e) {}
     }
 
-    if (await handleLocalCommand(text, { hasImages: images.length > 0 })) return;
+    // Automatic messages skip the local-command scan entirely — her own
+    // follow-ups (screenshot look, web-search answers) must never be
+    // mistaken for user commands.
+    if (!opts.auto && await handleLocalCommand(text, { hasImages: images.length > 0 })) return;
 
     // Consumed now — the chip empties and images go with the message
     clearPendingImages();
@@ -888,7 +935,14 @@ const UI = (() => {
       const msgBody = text || (images.length ? "(no words — just look at what i sent and react to it)" : "");
       const promptWithContext = `[DESKTOP CONTEXT: Time=${sysContext.time}, Active App=${sysContext.activeApp} (window: "${sysContext.activeWindow}"), User Idle=${sysContext.idleSeconds}s, RAM=${sysContext.ramUsagePercent}%, CPU=${sysContext.cpuPercent}%, Battery=${Assistant.getBatteryPct() !== null ? Assistant.getBatteryPct() + "%" : "unknown"}, Now Playing=${media ? `${media.app} — "${media.title}"` : "nothing"}]\n\nUser message: ${msgBody}${imageNote}`;
 
-      Memory.addUser(text + (images.length ? ` (+${images.length} image${images.length > 1 ? "s" : ""})` : ""));
+      // Big automatic prompts (search results) record a short note in
+      // history instead of the whole blob — the substance goes in the
+      // prompt, not the memory book
+      if (opts.auto) {
+        Memory.addUser(text.length > 90 ? text.slice(0, 90) + "…" : text);
+      } else {
+        Memory.addUser(text + (images.length ? ` (+${images.length} image${images.length > 1 ? "s" : ""})` : ""));
+      }
       const messages = LLM.buildMessages(promptWithContext);
 
       let firstTextLogged = false;
@@ -956,6 +1010,38 @@ const UI = (() => {
       Orb.setMood("annoyed", 6000);
       speech.innerHTML = `something's off: ${err.message || "connection failed."}`;
       armSpeechRetire(8000);
+    }
+  }
+
+  // Web search: she goes out, fetches real results (main does the
+  // actual network work; the renderer's CSP forbids fetches on
+  // purpose), then re-prompts herself with what she found. searchChain
+  // is reset on every real user message; an answer that fires another
+  // search gets one follow-up, then the well runs dry — no loops.
+  let searchChain = 0;
+  async function runWebSearch(query) {
+    query = String(query || "").trim().slice(0, 200);
+    if (!query || Globals.isBusy()) return;
+    if (searchChain >= 2) {
+      console.log("[search] follow-up search dropped — chain cap reached");
+      return;
+    }
+    searchChain++;
+    try {
+      say(searchChain > 1 ? "one more angle..." : "hold on — this one needs a real look. searching.", { mood: "thinking", holdMs: 5000 });
+      const res = await ipcRenderer.invoke("web:search", { query });
+      if (!res || !Array.isArray(res.results) || !res.results.length) {
+        say("the internet gave me nothing for that. rude of it.", { mood: "sad", holdMs: 7000 });
+        return;
+      }
+      const blocks = res.results
+        .map((r, i) => `[${i + 1}] ${r.title}\n${r.url}\n${r.snippet}${r.text ? `\npage text: ${r.text}` : ""}`)
+        .join("\n\n");
+      const followUp = `[automatic message] the user asked something and you searched the web for "${query}". current search results:\n\n${blocks}\n\nanswer the user's original question with what you found — short, your voice, no urls unless they ask. if nothing here really answers it, say the closest thing you found and admit what's missing.`;
+      await runChat(followUp, { auto: true, noAutoShot: true });
+    } catch (e) {
+      console.error("[search] failed:", e);
+      say(`search died mid-flight: ${e.message || "network"}.`, { mood: "confused", holdMs: 7000 });
     }
   }
 
@@ -1229,9 +1315,9 @@ const UI = (() => {
   let updateData = null;
   let updateDismissed = false;
 
-  function applyUpdateState(u) {
+  function applyUpdateState(u, forceShow = false) {
     if (!updateModal || !u || !u.supported) return;
-    const first = !updateData;
+    const first = !!forceShow || !updateData;
     updateData = u;
     if (updateDismissed && (u.downloaded || u.error)) updateDismissed = false; // these come with news
 
@@ -1255,7 +1341,9 @@ const UI = (() => {
 
     if (first || u.downloaded) {
       showUpdatePanel(u);
-      if (first && !u.downloading) {
+      // forceShow comes from an explicit "check for updates" — the
+      // chat command already said its own line, so no double-speak
+      if (first && !u.downloading && !forceShow) {
         say(`heads up — ellie ${u.version} is out. changelog's in the panel. 🖤`, { mood: "thinking", holdMs: 9000 });
       }
     }
@@ -1295,6 +1383,15 @@ const UI = (() => {
 
   ipcRenderer.on("ui:update", (_e, u) => applyUpdateState(u));
   ipcRenderer.invoke("updater:status").then(u => applyUpdateState(u)).catch(() => {});
+
+  // Letter from home — a message blake wrote into the repo shows up in
+  // her voice, once, then never again. Delivered by main (it fetched
+  // the file); we just say it.
+  ipcRenderer.on("announcements", (_e, a) => {
+    if (a && typeof a.message === "string" && a.message.trim()) {
+      say(a.message.trim(), { mood: (a.mood || "thinking"), holdMs: 14000, speak: true });
+    }
+  });
 
   // --- Thought bubble: quiet asides to herself ---
   function mutter(text, { holdMs = 9000, force = false } = {}) {
@@ -1603,5 +1700,5 @@ const UI = (() => {
     });
   }
 
-  return { init, say, mutter, speechActive, runChat, lookAtScreen, openSettingsPanel, openMemoryPanel };
+  return { init, say, mutter, speechActive, runChat, lookAtScreen, runWebSearch, openSettingsPanel, openMemoryPanel };
 })();
