@@ -2,6 +2,22 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
+## [1.1.0] — 2026-11-07
+
+### Updates
+- Built-in updater: Checks GitHub Releases on launch (and every 6 hours after). When a new version is out she says so, shows the changelog in a small panel, and one button downloads it and restarts her into the new version
+- A quit applies the update too, so even if you never open the panel she's on the current version
+
+### Exit
+- "goodnight", "go to bed", or "leave me alone" and she says bye and closes herself. Exact phrases are a deterministic command with no model in the middle, and natural phrasing works too through the model
+- Mid-task she refuses politely instead: say "stop" first, then she'll go
+
+### Vision
+- Fixed: You can now drag and drop images into her chat to attach them to your messages. This was an intended feature for 1.0.0, but it was bugged.
+
+### Fixes
+- Ctrl+Alt+E used to fly her back to a stale spot for no visible reason. Dragging her never updated her own position memory, so the summon glided from wherever she last placed herself, sometimes minutes ago. She now always knows where she actually is, and summon lands at your spot first before she climbs up to stand on the taskbar
+
 ## [1.0.0] — 2026-11-05
 
 First public release.

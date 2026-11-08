@@ -430,7 +430,18 @@ function startWindowWatcher() {
   });
 
   watcherProcess.stderr.on("data", (err) => {
-    console.error("[Window Watcher Error]:", err.toString());
+    // PowerShell 5.1 serializes its error stream as CLIXML — the raw dump
+    // is pure noise ("#< CLIXML<Objs...>"). Decode the inner <S S="Error">
+    // records so real problems still show, and skip the wrapper.
+    const text = err.toString();
+    if (text.includes("CLIXML")) {
+      const real = [...text.matchAll(/<S S="Error">([^<]*)<\/S>/g)]
+        .map(m => m[1].replace(/_x000D__x000A_/g, " ").replace(/_x([0-9A-Fa-f]{4})_/g, ""))
+        .filter(l => l.trim() && !/^&lt;$/.test(l));
+      if (real.length) console.error("[Window Watcher Error]:", real.join(" | ").trim());
+      return;
+    }
+    if (text.trim()) console.error("[Window Watcher Error]:", text.trim());
   });
 }
 
@@ -1134,12 +1145,24 @@ ipcMain.handle("get-system-context", async () => {
 // Absolute window placement — the renderer's idle "director" hands over her
 // position. Dropping always-on-top lets the taskbar (a topmost window)
 // naturally cover her when she tucks underneath it at the bottom edge.
+// Both placement handlers echo the REAL position back to the renderer —
+// its own "known" position was only updated by her self-moves, so after a
+// manual drag she'd summon back to a stale spot like it's yesterday's news.
+function echoWindowPos(win) {
+  try {
+    if (!mainWindow || mainWindow.isDestroyed() || win.isDestroyed()) return;
+    const [posX, posY] = win.getPosition();
+    mainWindow.webContents.send("window-pos", { x: posX, y: posY });
+  } catch (e) {}
+}
+
 ipcMain.on("set-window-pos", (event, { x, y, onTop }) => {
   const win = BrowserWindow.fromWebContents(event.sender);
   if (!win) return;
   try {
     if (typeof onTop === "boolean" && win.isAlwaysOnTop() !== onTop) win.setAlwaysOnTop(onTop);
     if (Number.isFinite(x) && Number.isFinite(y)) win.setPosition(Math.round(x), Math.round(y));
+    echoWindowPos(win);
   } catch (e) {}
 });
 
@@ -1148,6 +1171,7 @@ ipcMain.on("move-window", (event, { x, y }) => {
   if (win) {
     const [currentX, currentY] = win.getPosition();
     win.setPosition(currentX + x, currentY + y);
+    echoWindowPos(win);
   }
 });
 
@@ -1165,7 +1189,7 @@ ipcMain.on("set-ignore-mouse-events", (event, ignore, options) => {
 let snipOverlay = null;
 let snipImage = null; // full-screen dataURL captured before the overlay shows
 
-const SNIP_HTML = `<!doctype html><html><head><meta charset="utf-8"><style>
+const SNIP_HTML = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline';"><style>
 html,body{margin:0;padding:0;width:100vw;height:100vh;background:transparent;overflow:hidden;cursor:crosshair}
 #shade{position:fixed;inset:0;background:rgba(8,8,14,0.35)}
 #sel{position:fixed;border:1px solid #b892ff;display:none;box-shadow:0 0 0 100000px rgba(8,8,14,0.45)}
@@ -1272,6 +1296,51 @@ ipcMain.on("snip:rect", (_e, rect) => {
   closeSnip();
 });
 
+// ============================================================
+// Exit tool — "goodnight" / "leave me alone" and she goes under
+// her own power. Deterministic in the renderer, but the quit
+// itself always happens here in main so nothing can half-die.
+// Falls back to a hard exit if quit is swallowed.
+// ============================================================
+ipcMain.handle("app:exit", async () => {
+  console.log("[Exit] renderer asked ellie to call it a night");
+  app.isQuitting = true;
+  app.quit();
+  setTimeout(() => { try { app.exit(0); } catch (e) {} }, 2500);
+});
+
+// ============================================================
+// Updater IPC — the renderer panel reads state, starts the
+// download, and triggers the restart-and-apply. All guarded on
+// `supported` so a dev run can never self-update.
+// ============================================================
+ipcMain.handle("updater:status", async () => ({ ...updateState }));
+
+ipcMain.handle("updater:download", async () => {
+  if (!updateState.supported || !updateState.available || updateState.downloaded) {
+    return { ...updateState };
+  }
+  try {
+    await autoUpdater.downloadUpdate();
+  } catch (e) {
+    updateState.error = e.message;
+    broadcastUpdate();
+  }
+  return { ...updateState };
+});
+
+ipcMain.handle("updater:install", async () => {
+  if (!updateState.supported || !updateState.downloaded) return { ...updateState };
+  app.isQuitting = true;
+  try {
+    autoUpdater.quitAndInstall(false, false);
+  } catch (e) {
+    console.log("[updater] install failed:", e.message);
+  }
+  setTimeout(() => { try { app.exit(0); } catch (e) {} }, 2500);
+  return { ...updateState };
+});
+
 ipcMain.on("snip:cancel", () => {
   const had = !!snipImage;
   closeSnip();
@@ -1283,29 +1352,81 @@ ipcMain.on("snip:cancel", () => {
 // ============================================================
 // Auto-update (install once, ever)
 // Only active when running as an installed/packaged app —
-// `npm start` dev runs skip it entirely.
+// `npm start` dev runs skip it entirely. The renderer gets a
+// play-by-play ("ui:update") and drives the download/restart
+// from its own panel; install-on-quit stays as the fallback.
 // ============================================================
+const updateState = {
+  supported: false,     // never true in dev (`npm start`) — by design
+  available: false,
+  version: null,
+  notes: "",
+  downloading: false,
+  progress: 0,
+  downloaded: false,
+  error: null
+};
+
+function sanitizeNotes(raw) {
+  // GitHub release bodies arrive as markdown text; if a release ever
+  // lists notes as objects, flatten them into one string.
+  if (Array.isArray(raw)) {
+    return raw.map(n => (typeof n === "string" ? n : n.text || "")).join("\n");
+  }
+  return typeof raw === "string" ? raw : "";
+}
+
+function broadcastUpdate() {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send("ui:update", { ...updateState });
+  } catch (e) {}
+}
+
 function setupUpdater() {
   if (!app.isPackaged) {
     console.log("[updater] dev mode — auto-update disabled");
     return;
   }
-  autoUpdater.autoDownload = true;
-  autoUpdater.autoInstallOnAppQuit = true; // applies silently on next quit
+  updateState.supported = true;
+  autoUpdater.autoDownload = false;             // the renderer's panel owns the button
+  autoUpdater.autoInstallOnAppQuit = true;      // ...and even if she never notices, a quit applies it
 
   autoUpdater.on("checking-for-update", () => console.log("[updater] checking…"));
-  autoUpdater.on("update-available", (info) => console.log("[updater] update available:", info.version));
+  autoUpdater.on("update-available", (info) => {
+    console.log("[updater] update available:", info.version);
+    updateState.available = true;
+    updateState.version = info.version;
+    updateState.notes = sanitizeNotes(info.releaseNotes);
+    broadcastUpdate();
+  });
   autoUpdater.on("update-not-available", () => console.log("[updater] up to date"));
-  autoUpdater.on("error", (err) => console.log("[updater] error:", err.message));
+  autoUpdater.on("error", (err) => {
+    console.log("[updater] error:", err.message);
+    if (updateState.available) {
+      updateState.error = err.message;
+      broadcastUpdate();
+    }
+  });
   autoUpdater.on("download-progress", (p) => {
-    if (Math.floor(p.percent) % 25 === 0) console.log("[updater] downloading:", Math.floor(p.percent) + "%");
+    const pct = Math.floor(p.percent);
+    if (pct === updateState.progress) return;
+    updateState.downloading = true;
+    updateState.error = null;
+    updateState.progress = pct;
+    if (pct % 10 === 0) console.log("[updater] downloading:", pct + "%");
+    broadcastUpdate();
   });
   autoUpdater.on("update-downloaded", (info) => {
-    console.log("[updater] downloaded", info.version, "— installs on next quit");
+    console.log("[updater] downloaded", info.version, "— ready to restart");
+    updateState.downloading = false;
+    updateState.downloaded = true;
+    updateState.progress = 100;
+    broadcastUpdate();
     try {
       new Notification({
         title: "ellie 💫 update ready",
-        body: `v${info.version} downloaded — restart ellie (or quit her) to get it`,
+        body: `v${info.version} is downloaded — hit her panel to restart & update`,
         silent: true
       }).show();
     } catch (e) {}
@@ -1466,11 +1587,11 @@ function createWindow() {
     });
   }
 
-  // Mirror renderer console output into the main terminal (debugging aid)
-  mainWindow.webContents.on("console-message", (e, level, message) => {
-    const msg = (e && typeof e === "object" && "message" in e) ? e.message : message;
+  // Mirror renderer console output into the main terminal (debugging aid).
+  // New event-object API (Electron deprecated the (event, level, msg) args).
+  mainWindow.webContents.on("console-message", (event) => {
     try {
-      console.log("[renderer]", String(msg).slice(0, 300));
+      console.log("[renderer]", String(event.message || "").slice(0, 300));
     } catch (err) {}
   });
 

@@ -2,6 +2,8 @@
 <html>
 <head>
   <meta charset="UTF-8">
+  <meta http-equiv="Content-Security-Policy"
+    content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' file: data: blob:; font-src 'self' data:; connect-src 'self' file: data: blob:; object-src 'none'; base-uri 'none'; form-action 'none'; frame-src 'none'">
   <title>ellie</title>
   <style>
     * { box-sizing: border-box; margin: 0; padding: 0; user-select: none; }
@@ -297,6 +299,53 @@
       line-height: 1.4;
       margin-top: 10px;
     }
+    /* Update panel — same bones as the settings/memory modals */
+    #update-modal {
+      display: none;
+      position: absolute;
+      bottom: 60px;
+      width: 280px;
+      max-height: 285px;
+      overflow-y: auto;
+      background: rgba(12, 14, 28, 0.96);
+      border: 1px solid rgba(155, 101, 255, 0.6);
+      border-radius: 14px;
+      padding: 14px;
+      color: #e0f7fc;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.85);
+      z-index: 100;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(155, 101, 255, 0.45) transparent;
+    }
+    #update-modal h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+      color: #a2b5ff;
+    }
+    #update-notes {
+      font-size: 11.5px;
+      line-height: 1.45;
+      color: #dfe8ff;
+      white-space: pre-wrap;
+      word-wrap: break-word;
+      max-height: 140px;
+      overflow-y: auto;
+      scrollbar-width: thin;
+    }
+    #update-status {
+      font-size: 10.5px;
+      color: #8ab4f8;
+      margin-top: 6px;
+      min-height: 14px;
+    }
+    #update-btn {
+      background: #9b65ff;
+      color: #ffffff;
+    }
+    #update-btn:hover { background: #b282ff; }
+    #update-btn:disabled { opacity: 0.6; cursor: default; }
+    #update-later-btn { background: rgba(255, 255, 255, 0.1); color: #ccc; }
+    #update-later-btn:hover { background: rgba(255, 255, 255, 0.2); }
     /* Thought bubble — comic-panel asides; top/bottom set at show-time
        from the live layout (below the speech bubble, above her head) */
     #thought-bubble {
@@ -504,7 +553,7 @@
       </div>
 
       <div class="settings-hint">
-        Try: "remind me in 20 minutes to stretch" · "list reminders" · "start pomodoro" · "remember that I'm a night owl" · "what do you remember" · "forget that" · "wear headphones" / "wear beanie" / "wear sunglasses" · "voice on" · Ctrl+Alt+E summons her from anywhere (also force-stops a pc task mid-run) · "use the pc: open calculator" · paste or drop an image, or hit ✂ to snip a piece of your screen and ask about it · double-click me to pet 🖤
+        Try: "remind me in 20 minutes to stretch" · "list reminders" · "start pomodoro" · "remember that I'm a night owl" · "what do you remember" · "forget that" · "wear headphones" / "wear beanie" / "wear sunglasses" · "voice on" · Ctrl+Alt+E summons her from anywhere (also force-stops a pc task mid-run) · "use the pc: open calculator" · paste or drop an image, or hit ✂ to snip a piece of your screen and ask about it · "goodnight" and she closes herself · double-click me to pet 🖤
       </div>
     </div>
 
@@ -519,6 +568,17 @@
         <button id="mem-close-btn">Close</button>
       </div>
       <div class="settings-hint">★ = pinned — she treats these as core facts and they're saved when her memory overflows.</div>
+    </div>
+
+    <div id="update-modal">
+      <h3>💫 update available</h3>
+      <div id="update-notes"></div>
+      <div id="update-status"></div>
+      <div class="modal-actions">
+        <button id="update-later-btn">Later</button>
+        <button id="update-btn">Download &amp; Install</button>
+      </div>
+      <div class="settings-hint">she checks github releases herself — the download lands on your machine and a restart applies it. dev runs don't self-update.</div>
     </div>
 
     <canvas id="canvas" width="180" height="180"></canvas>

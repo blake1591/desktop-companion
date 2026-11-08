@@ -151,7 +151,11 @@ const Assistant = (() => {
     // action is dropped — her spoken reply still goes out untouched.
     const PANEL_GATES = {
       memory: /(memor|remember|forgot|forget|recall|know about (?:me|my|us)|saved about (?:me|my)|memory book|\bbook\b)/i,
-      settings: /(setting|config|prefer|option|voice|tts|speak|provider|api key|\bkey\b|model|hotkey|summon|chatter|talkativ|computer control|toggle|enable|disable|switch (?:to|it)|turn (?:on|off))/i
+      settings: /(setting|config|prefer|option|voice|tts|speak|provider|api key|\bkey\b|model|hotkey|summon|chatter|talkativ|computer control|toggle|enable|disable|switch (?:to|it)|turn (?:on|off))/i,
+      // Exit has no panel — the gate just mirrors what the user text must
+      // read like for "quit yourself" to be real ("goodnight, go to bed,
+      // leave me alone, exit"). Kept out of stray re-fires from history.
+      exit: /(\bexit\b|\bquits?\b|quitting|good\s?night|goodnight|go to bed|going to bed|go to sleep|going to sleep|leave me alone|goodbye ellie|bye ellie|see you (?:later|tomorrow)|i'm out|heading (?:out|to bed)|take a nap|shut yourself|close yourself)/i
     };
     const gate = PANEL_GATES[action.type];
     if (gate && typeof ctx.userText === "string" && ctx.userText.trim()) {
@@ -215,6 +219,32 @@ const Assistant = (() => {
       startComputerTask(goal);
       return;
     }
+
+    // She calls it a night herself — mid-task gets a polite refusal
+    // (both handled inside exitNow; the deterministic "goodnight"
+    // command lands here too).
+    if (action.type === "exit") {
+      exitNow();
+      return;
+    }
+  }
+
+  function exitNow() {
+    if (pcTask) {
+      UI.say("can't leave yet — i'm still on a task. say 'stop' first and then i'll go.", { mood: "confused", holdMs: 8000, speak: true });
+      return;
+    }
+    const farewells = [
+      "alright... goodnight. i'll be here when you're back. 🖤",
+      "fine, i'll disappear. don't forget me in the morning.",
+      "going under. the taskbar makes a good blanket.",
+      "okay, leaving you alone... probably off listening to sad music somewhere.",
+      "bye for now. the desktop's yours."
+    ];
+    UI.say(farewells[Math.floor(Math.random() * farewells.length)], { mood: "idle", holdMs: 3500, speak: true });
+    setTimeout(() => {
+      ipcRenderer.invoke("app:exit").catch(() => {});
+    }, 3400);
   }
 
   async function listRemindersText() {
@@ -720,6 +750,7 @@ wait: {"type":"wait","seconds":1} — use when something needs time to appear (m
     pcResumePending: () => !!pcResume,
     requestStop: () => { pcAbort = true; },
     startComputerTask,
-    resumeComputerTask
+    resumeComputerTask,
+    exitNow
   };
 })();

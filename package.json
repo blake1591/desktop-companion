@@ -1,8 +1,9 @@
 {
   "name": "desktop-companion",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "main": "main.js",
-  "description": "Ellie — an emo 2D desktop pet companion with memory, reminders, vision and voice.",
+  "description": "Ellie — an emo 2D desktop companion with memory, reminders, vision and voice.",
+  "author": "blake1591",
   "scripts": {
     "start": "electron .",
     "dist": "electron-builder --win",

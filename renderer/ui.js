@@ -3,7 +3,7 @@
 // settings panel, mic/voice wiring, mouse handling.
 // ============================================================
 const UI = (() => {
-  const { ipcRenderer } = require("electron");
+  const { ipcRenderer, webUtils } = require("electron");
 
   const speech = document.getElementById("speech-bubble");
   const inputContainer = document.getElementById("input-container");
@@ -587,6 +587,14 @@ const UI = (() => {
       return true;
     }
 
+    // Exit tool: "goodnight" / "go to bed" / "leave me alone" — exact
+    // phrases, deterministic, no model in the middle. She says bye and
+    // closes herself (Assistant.exitNow shouts if she's mid-task).
+    if (/^(good\s?night|night ellie|go to bed|going to bed|go to sleep|going to sleep|leave me alone|goodbye ellie|bye ellie|see you (?:later|tomorrow),? ellie|ellie[,\s]+(?:goodnight|good night|bye|goodbye)|exit\b|quit\b)/.test(lower)) {
+      Assistant.exitNow();
+      return true;
+    }
+
     if (lower === "settings" || lower === "open settings" || lower.includes("open settings") || lower.includes("show settings")) {
       openSettingsPanel();
       return true;
@@ -806,13 +814,34 @@ const UI = (() => {
     })();
   });
 
-  // Drag & drop image files onto Ellie
+  // Drag & drop image files onto Ellie. Electron 45 removed File.path —
+  // webUtils.getPathForFile is the replacement for files that exist on
+  // disk. Files with no disk path (dragged out of a browser window or
+  // clipboard-share) still carry raw bytes, so those get saved like a
+  // paste. This is the path that never worked in 1.0.0 — it works now.
   window.addEventListener("dragover", (e) => { e.preventDefault(); });
   window.addEventListener("drop", (e) => {
     e.preventDefault();
     const files = Array.from((e.dataTransfer && e.dataTransfer.files) || []);
-    for (const f of files.slice(0, MAX_PENDING_IMAGES)) {
-      if (f.path) addPendingImageFromPath(f.path);
+    let taken = 0;
+    for (const f of files) {
+      if (taken >= MAX_PENDING_IMAGES) break;
+      let p = "";
+      try { p = webUtils.getPathForFile(f) || f.path || ""; } catch (err) { p = f.path || ""; }
+      if (p && /\.(png|jpe?g|webp|gif|bmp)$/i.test(p)) {
+        addPendingImageFromPath(p);
+        taken += 1;
+      } else if ((f.type || "").startsWith("image/")) {
+        // No disk path — image bytes only (browser drag, shared clipboard)
+        f.arrayBuffer().then(buf =>
+          ipcRenderer.invoke("vision:save-image", new Uint8Array(buf))
+        ).then(info => { addPendingImage(info); })
+          .catch(err => { say("couldn't grab that image. try ✂ or paste it.", { mood: "confused", holdMs: 4000 }); });
+        taken += 1;
+      }
+    }
+    if (files.length && !taken) {
+      say("dropped something, but it's not an image — i only take pictures.", { mood: "confused", holdMs: 5000 });
     }
     inputContainer.style.display = "flex";
     input.focus();
@@ -1188,6 +1217,85 @@ const UI = (() => {
     imgChip.style.borderColor = Orb.toHaloStr(0.5);
   }, 250);
 
+  // --- Update panel: new version notices straight from her releases ---
+  // Main broadcasts "ui:update"; the panel walks through available →
+  // downloading → downloaded, and the button does the rest. "Later"
+  // just tucks the panel away until her next look at GitHub.
+  const updateModal = document.getElementById("update-modal");
+  const updateNotes = document.getElementById("update-notes");
+  const updateStatus = document.getElementById("update-status");
+  const updateBtn = document.getElementById("update-btn");
+  const updateLaterBtn = document.getElementById("update-later-btn");
+  let updateData = null;
+  let updateDismissed = false;
+
+  function applyUpdateState(u) {
+    if (!updateModal || !u || !u.supported) return;
+    const first = !updateData;
+    updateData = u;
+    if (updateDismissed && (u.downloaded || u.error)) updateDismissed = false; // these come with news
+
+    if (!u.available) {
+      hideUpdatePanel();
+      return;
+    }
+    if (updateDismissed && !u.downloaded && !u.error) return;
+
+    let line = "";
+    if (u.error) line = "update download hiccupped: " + u.error;
+    else if (u.downloaded) line = "downloaded. one restart and she's new.";
+    else if (u.downloading) line = "downloading... " + (u.progress || 0) + "%";
+    else line = "";
+    updateStatus.textContent = line;
+
+    updateBtn.textContent =
+      u.downloaded ? "Restart & Update" :
+      u.downloading ? "Downloading..." : "Download & Install";
+    updateBtn.disabled = !!u.downloading;
+
+    if (first || u.downloaded) {
+      showUpdatePanel(u);
+      if (first && !u.downloading) {
+        say(`heads up — ellie ${u.version} is out. changelog's in the panel. 🖤`, { mood: "thinking", holdMs: 9000 });
+      }
+    }
+  }
+
+  function showUpdatePanel(u) {
+    const short = String(u.notes || "").trim().replace(/\r/g, "");
+    const body = short
+      ? short.split("\n").filter(l => l.trim() && !/^#/.test(l)).slice(0, 8).join("\n")
+      : "(no notes, just trust her)";
+    updateNotes.textContent = "ellie " + u.version + " is out:\n" + body;
+    updateModal.style.display = "block";
+    memoryModal.style.display = "none";
+    settingsModal.style.display = "none";
+  }
+
+  function hideUpdatePanel() {
+    updateModal.style.display = "none";
+  }
+
+  updateBtn.addEventListener("click", async () => {
+    if (!updateData) return;
+    if (updateData.downloaded) {
+      await ipcRenderer.invoke("updater:install");
+      return;
+    }
+    if (!updateData.downloading) {
+      updateBtn.disabled = true;
+      await ipcRenderer.invoke("updater:download");
+    }
+  });
+
+  updateLaterBtn.addEventListener("click", () => {
+    updateDismissed = true;
+    hideUpdatePanel();
+  });
+
+  ipcRenderer.on("ui:update", (_e, u) => applyUpdateState(u));
+  ipcRenderer.invoke("updater:status").then(u => applyUpdateState(u)).catch(() => {});
+
   // --- Thought bubble: quiet asides to herself ---
   function mutter(text, { holdMs = 9000, force = false } = {}) {
     if (!thoughtBubbleEl) return false;
@@ -1273,6 +1381,16 @@ const UI = (() => {
     let hidden = false, pinned = false;
     let hiddenX = 0, hiddenY = 0, hiddenAt = 0;
     let nextWander = 0, peekTimer = null;
+
+    // Main echoes the REAL window position after every placement — manual
+    // drags included (the drag path sends raw deltas and she'd otherwise
+    // never learn where she actually is; summon would fly her back to a
+    // stale spot from before the drag).
+    ipcRenderer.on("window-pos", (_e, p) => {
+      if (p && Number.isFinite(p.x) && Number.isFinite(p.y)) {
+        known = { x: Math.round(p.x), y: Math.round(p.y) };
+      }
+    });
 
     function clampX(x) {
       // keep the orb body (center ORB_CX px in from the window's left edge)
