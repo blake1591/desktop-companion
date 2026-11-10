@@ -1,6 +1,6 @@
 {
   "name": "desktop-companion",
-  "version": "1.2.3",
+  "version": "1.2.4",
   "main": "main.js",
   "description": "Ellie — an emo 2D desktop companion with memory, reminders, vision and voice.",
   "author": "blake1591",

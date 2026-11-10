@@ -1223,13 +1223,17 @@ const UI = (() => {
       return; // dragging = always interactive
     }
 
-    // Hit-testing for mouse pass-through (bubble, input, mic, settings, orb)
+    // Hit-testing for mouse pass-through (bubble, input, mic, settings,
+    // memory, update panel, orb). The update panel being missing from
+    // this list made its buttons half-clickable: the half overlapping
+    // her orb radius got clicks, the rest passed through to nothing.
     const hitRects = [];
     if (speech.style.display !== "none") hitRects.push(speech.getBoundingClientRect());
     if (inputContainer.style.display !== "none") hitRects.push(inputContainer.getBoundingClientRect());
     if (imgChip.classList.contains("active")) hitRects.push(imgChip.getBoundingClientRect());
     if (settingsModal.style.display !== "none") hitRects.push(settingsModal.getBoundingClientRect());
     if (memoryModal.style.display !== "none") hitRects.push(memoryModal.getBoundingClientRect());
+    if (updateModal.style.display !== "none") hitRects.push(updateModal.getBoundingClientRect());
 
     let isOverInteractive = isOverAnything(hitRects, e.clientX, e.clientY);
 

@@ -2,6 +2,11 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
+## [1.2.4] — 2026-11-09
+
+### Fixes
+- The update panel's buttons were only half clickable. Fixed.
+
 ## [1.2.3] — 2026-11-09
 
 ### Fixes
