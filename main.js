@@ -1511,12 +1511,20 @@ ipcMain.handle("app:exit", async () => {
 ipcMain.handle("updater:status", async () => ({ ...updateState, current: app.getVersion() }));
 
 // Explicit check (tray button and the "check for updates" chat
-// command). Awaits the check so the caller gets fresh state —
-// broadcasts update the panel meanwhile, as usual.
+// command). Raced against a 15s timeout so a stuck check can never
+// hang the chat command — we log every attempt either way.
 ipcMain.handle("updater:check", async () => {
   if (!app.isPackaged) return { ...updateState, current: app.getVersion() };
-  try { await autoUpdater.checkForUpdates(); }
-  catch (e) { updateState.error = e.message; console.log("[updater] manual chat check failed:", e.message); }
+  updLog("info", "manual check requested (tray or chat command)");
+  try {
+    await Promise.race([
+      autoUpdater.checkForUpdates(),
+      new Promise(res => setTimeout(() => { updLog("warn", "manual check stalled past 15s — answering with last known state"); res(); }, 15000))
+    ]);
+  } catch (e) {
+    updateState.error = e.message;
+    console.log("[updater] manual chat check failed:", e.message);
+  }
   return { ...updateState, current: app.getVersion() };
 });
 
@@ -1572,12 +1580,43 @@ const updateState = {
 };
 
 function sanitizeNotes(raw) {
-  // GitHub release bodies arrive as markdown text; if a release ever
-  // lists notes as objects, flatten them into one string.
+  // GitHub release notes arrive here, one way or another, as text.
+  // If a release ever lists notes as objects, flatten them.
+  let text = "";
   if (Array.isArray(raw)) {
-    return raw.map(n => (typeof n === "string" ? n : n.text || "")).join("\n");
+    text = raw.map(n => (typeof n === "string" ? n : n.text || "")).join("\n");
+  } else if (typeof raw === "string") {
+    text = raw;
   }
-  return typeof raw === "string" ? raw : "";
+  text = text.replace(/\r/g, "");
+  // The GitHub provider hands the release body over as rendered HTML —
+  // flatten it so the panel shows words, not markup: <li> becomes a
+  // bullet, headings and wrappers disappear, entities decode.
+  if (/<[a-z][\s\S]*?>/i.test(text)) {
+    text = text
+      .replace(/<h[1-6][^>]*>([\s\S]*?)<\/h[1-6]>/gi, "$1")
+      .replace(/<li[^>]*>([\s\S]*?)(<\/li>|$)/gi, "• $1")
+      .replace(/<\/?(?:ul|ol|p|div|strong|em|b|br|a|code|span|blockquote)[^>]*>/gi, "")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&#x27;|&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&")
+      .replace(/&lt;/g, "<")
+      .replace(/&gt;/g, ">")
+      .replace(/&nbsp;/g, " ")
+      .replace(/\n{3,}/g, "\n\n");
+  }
+  return text.trim();
+}
+
+// File log, shared by the updater everywhere: checks, results and
+// failures all land in %APPDATA%\desktop-companion\updater.log
+// (userData is valid after app ready; handlers only run post-ready)
+function updLog(level, msg) {
+  try {
+    fs.appendFileSync(path.join(app.getPath("userData"), "updater.log"),
+      `[${new Date().toISOString()}] [${level}] ${msg}\n`);
+  } catch (e) {}
 }
 
 function broadcastUpdate() {
@@ -1596,20 +1635,12 @@ function setupUpdater() {
   autoUpdater.autoDownload = false;             // the renderer's panel owns the button
   autoUpdater.autoInstallOnAppQuit = true;      // ...and even if she never notices, a quit applies it
 
-  // File log so her updater is never mysterious again: every check,
-  // result and failure lands in %APPDATA%\desktop-companion\updater.log
-  const appendUpdLog = (level, args) => {
-    try {
-      const text = args.map(a => (typeof a === "string" ? a : JSON.stringify(a))).join(" ");
-      fs.appendFileSync(path.join(app.getPath("userData"), "updater.log"),
-        `[${new Date().toISOString()}] [${level}] ${text}\n`);
-    } catch (e) {}
-  };
+  // File log so her updater is never mysterious again — shared helper
   autoUpdater.logger = {
-    info: (...args) => { console.log("[updater]", ...args); appendUpdLog("info", args); },
-    warn: (...args) => { console.log("[updater] WARN", ...args); appendUpdLog("warn", args); },
-    error: (...args) => { console.log("[updater] ERROR", ...args); appendUpdLog("error", args); },
-    debug: (...args) => { appendUpdLog("debug", args); }
+    info: (...args) => { console.log("[updater]", ...args); updLog("info", args.join(" ")); },
+    warn: (...args) => { console.log("[updater] WARN", ...args); updLog("warn", args.join(" ")); },
+    error: (...args) => { console.log("[updater] ERROR", ...args); updLog("error", args.join(" ")); },
+    debug: (...args) => { updLog("debug", args.join(" ")); }
   };
 
   autoUpdater.on("checking-for-update", () => console.log("[updater] checking…"));
@@ -1652,9 +1683,15 @@ function setupUpdater() {
     } catch (e) {}
   });
 
-  const check = () => { autoUpdater.checkForUpdates().catch((e) => console.log("[updater] check failed:", e.message)); };
-  setTimeout(check, 20000);                   // shortly after boot
-  setInterval(check, 6 * 60 * 60 * 1000);     // then every 6 hours
+  const check = (source) => {
+    updLog("info", `scheduled check starting (${source})`);
+    autoUpdater.checkForUpdates().catch((e) => {
+      console.log("[updater] check failed:", e.message);
+      updLog("error", `scheduled check failed: ${e.message}`);
+    });
+  };
+  setTimeout(() => check("boot +20s"), 20000);         // shortly after boot
+  setInterval(() => check("6h timer"), 6 * 60 * 60 * 1000);  // then every 6 hours
 }
 
 // ============================================================

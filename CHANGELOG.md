@@ -2,6 +2,13 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
+## [1.2.3] — 2026-11-09
+
+### Fixes
+- The update panel showed the release notes as raw html instead of plain text.
+- Every update check now leaves a trace in updater.log, including hung ones.
+- Other fixes with built-in updater.
+
 ## [1.2.2] — 2026-11-09
 
 ### Icon

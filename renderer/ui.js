@@ -621,10 +621,12 @@ const UI = (() => {
       return true;
     }
 
-    // "check for updates" — the tray button's twin, in chat. Explicit
-    // ask overrides a dismissed panel and forces it back open when
-    // there's news.
-    if (/^(check for updates|check updates|any new updates|any updates|are you up to date)\??$/.test(lower)) {
+    // "check for updates" family — the tray button's twin, in chat.
+    // Broadened after 1.2.2 testing: any update-shaped question routes
+    // here instead of falling through to the model (which used to
+    // "check" by taking over your PC). Bounded to update-sounding
+    // phrases only, so real searches still get through.
+    if (/^(?:check\s+(?:for\s+|the\s+|up\s+|on\s+)?(?:an\s+|any\s+|new\s+|latest\s+|for\s+the\s+|for\s+an\s+|for\s+any\s+|for\s+new\s+|for\s+the\s+latest\s+)*updates?\b|look\s+for\s+updates?\b|any\s+(?:new\s+)?updates?\b|update\s+check\b|are\s+you\s+up\s+to\s+date\b|are\s+there\s+(?:any\s+|new\s+)*(?:new\s+)?updates?\b|is\s+there\s+(?:a\s+|an\s+|any\s+|new\s+)*(?:new\s+)?update\b|update\s+yourself\b|do\s+updates?\b|updates?\b)\s*[?!.]*$/.test(lower)) {
       const st = await ipcRenderer.invoke("updater:check");
       if (!st) {
         say("update check failed. even the sky guvnor is offline, apparently.", { mood: "confused", holdMs: 7000 });
@@ -1372,7 +1374,15 @@ const UI = (() => {
   }
 
   function showUpdatePanel(u) {
-    const short = String(u.notes || "").trim().replace(/\r/g, "");
+    // main hands over clean notes; this is belt and braces in case any
+    // markup still sneaks through from the GitHub provider
+    const stripped = String(u.notes || "")
+      .replace(/<li[^>]*>/gi, "• ")
+      .replace(/<[^>]+>/g, "")
+      .replace(/&#x27;|&#39;/g, "'")
+      .replace(/&quot;/g, '"')
+      .replace(/&amp;/g, "&");
+    const short = stripped.trim().replace(/\r/g, "");
     const body = short
       ? short.split("\n").filter(l => l.trim() && !/^#/.test(l)).slice(0, 8).join("\n")
       : "(no notes, just trust her)";
