@@ -2,6 +2,11 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
+## [1.2.2] — 2026-11-09
+
+### Icon
+- Icons with a background all had Ellie a bit low in the image. Now she is set in the center.
+
 ## [1.2.1] — 2026-11-08
 
 ### Fixes
