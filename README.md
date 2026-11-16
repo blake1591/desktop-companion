@@ -29,6 +29,8 @@ Ellie is a small Electron app, a glowing orb with a face who lives on your deskt
 ### Memory
 - **Memory book** — she proactively saves facts (name, favorites, projects, ongoing things), and you can open the book, edit, pin ★ (pinned entries survive auto-deletion). A "forget that ..." chat command works too, with a confirmation.
 - **Name** — she learns your name on first boot and uses it occasionally.
+- **Journal** — her diary fills itself, no commands needed: what you say to her and what she does for you (tasks, reminders, timers, searches) all get a dated line. "show my journal" opens it (it lives in the memory panel), and "how was my day" / "how was my week" gets an actual answer out of it.
+- **Day counter** — she knows how long she has been installed, and she brings it up on milestone days (7, 30, 100...).
 
 ### Vision
 - **Drag & drop** — drag an image file onto her and it attaches to the chat.

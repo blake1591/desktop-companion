@@ -178,7 +178,90 @@ const Memory = (() => {
   function wipeAll() {
     wipeHistory();
     wipeMemories();
+    wipeJournal();
   }
+
+  // --- Journal: what the user said and what she did, day by day ---
+  // Distinct from memories: memories are curated FACTS (name, favorites,
+  // projects). The journal is the raw diary — every chat line and every
+  // deterministic event (tasks, reminders, searches), grouped by the
+  // user's LOCAL calendar day. It answers "how was my week".
+  const JOURNAL_KEY = "ellie_journal";
+  const MAX_JOURNAL = 500;                // entries kept (weeks of use)
+  let journalLog = load(JOURNAL_KEY) || []; // [{ text, at, source }]
+
+  function persistJournal() {
+    localStorage.setItem(JOURNAL_KEY, JSON.stringify(journalLog));
+  }
+
+  function journal(text, source = "chat") {
+    let t = String(text || "").trim();
+    if (!t) return false;
+    if (t.length > 200) t = t.slice(0, 200);
+    // An exact repeat of the freshest entry within a minute is a double
+    // fire, not a second diary line — skip it. Anything older is real.
+    const last = journalLog[journalLog.length - 1];
+    if (last && last.text === t && Date.now() - last.at < 60000) return false;
+    journalLog.push({ text: t, at: Date.now(), source });
+    if (journalLog.length > MAX_JOURNAL) journalLog = journalLog.slice(-MAX_JOURNAL);
+    persistJournal();
+    return true;
+  }
+
+  // Calendar day in the user's own timezone — her diaries follow THEIR
+  // midnight, not UTC's.
+  function localDay(ts) {
+    const d = new Date(ts);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  }
+
+  // Recent days, newest first: [{ day, entries: [{text, at, source}] }]
+  function getJournalDays(nDays = 7) {
+    const groups = {};
+    for (const e of journalLog) {
+      const day = localDay(e.at);
+      (groups[day] = groups[day] || []).push(e);
+    }
+    return Object.keys(groups).sort().reverse().slice(0, nDays)
+      .map(day => ({ day, entries: groups[day] }));
+  }
+
+  // Prompt block for "how was my day/week" — getMemoriesBlock's diary twin
+  function getJournalBlock(nDays = 7) {
+    const days = getJournalDays(nDays);
+    if (!days.length) return "";
+    return days.map(({ day, entries }) =>
+      `${day}:\n` + entries.map(e => {
+        const t = new Date(e.at);
+        const hhmm = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+        return `- ${hhmm} ${e.source === "event" ? "(she did) " : "(you said) "}${e.text}`;
+      }).join("\n")
+    ).join("\n");
+  }
+
+  function wipeJournal() {
+    journalLog = [];
+    localStorage.removeItem(JOURNAL_KEY);
+  }
+
+  // --- Day counter: "day N of ellie" ---
+  const DAY_ONE_KEY = "ellie_day_one";
+  let dayOne = load(DAY_ONE_KEY);
+  if (!dayOne) {
+    dayOne = Date.now();
+    localStorage.setItem(DAY_ONE_KEY, JSON.stringify(dayOne));
+  }
+
+  // Whole days elapsed since she first ran, +1 — so the day she's
+  // installed on is "day 1 of ellie", the next real day is day 2.
+  function getDayCount() {
+    const [y1, m1, d1] = localDay(dayOne).split("-").map(Number);
+    const [y2, m2, d2] = localDay(Date.now()).split("-").map(Number);
+    const diff = Math.round((Date.UTC(y2, m2 - 1, d2) - Date.UTC(y1, m1 - 1, d1)) / 86400000);
+    return diff + 1;
+  }
+
+  function getDayOne() { return dayOne; }
 
   return {
     addUser,
@@ -194,6 +277,12 @@ const Memory = (() => {
     getMemoriesBlock,
     wipeHistory,
     wipeMemories,
-    wipeAll
+    wipeJournal,
+    wipeAll,
+    journal,
+    getJournalDays,
+    getJournalBlock,
+    getDayCount,
+    getDayOne
   };
 })();

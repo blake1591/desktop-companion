@@ -2,6 +2,15 @@
 
 All notable changes to Ellie. Dates in YYYY-MM-DD.
 
+## [1.3.0] — 2026-11-16
+
+### Added
+- Ellie keeps a journal now. What you say to her and what she does for you (tasks, reminders, timers, searches) all get a dated line.
+- Ask her "how was my day" or "how was my week" and she answers from the journal.
+- "show my journal" opens it from chat. It lives in the same panel as her memories.
+- She now knows how long she has been installed, and she brings it up on milestone days.
+- Her journal is included when you clear her memory.
+
 ## [1.2.4] — 2026-11-09
 
 ### Fixes

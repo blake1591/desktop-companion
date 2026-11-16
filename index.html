@@ -293,6 +293,36 @@
       outline: none;
     }
     #mem-add-btn:hover { background: rgba(155, 101, 255, 0.25); }
+    /* Journal section — the diary of recent days, read-only */
+    #journal-block { margin-top: 14px; border-top: 1px solid rgba(155, 101, 255, 0.25); padding-top: 10px; }
+    #journal-block h4 {
+      margin: 0 0 6px 0;
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.5px;
+      text-transform: uppercase;
+      color: #8fa5e8;
+    }
+    #journal-list { max-height: 180px; overflow-y: auto; }
+    .journal-day { margin-bottom: 8px; }
+    .journal-day-head {
+      font-size: 10.5px;
+      color: #b7a6e8;
+      padding: 2px 0;
+    }
+    .journal-entry {
+      display: flex;
+      gap: 6px;
+      padding: 3px 2px 3px 8px;
+      font-size: 11.5px;
+      line-height: 1.35;
+      border-left: 2px solid rgba(155, 101, 255, 0.2);
+      margin-left: 4px;
+    }
+    .journal-entry.event { border-left-color: rgba(255, 157, 240, 0.45); }
+    .journal-entry .journal-time { color: rgba(223, 232, 255, 0.4); flex: 0 0 auto; }
+    .journal-entry .journal-text { color: #dfe8ff; flex: 1 1 auto; min-width: 0; word-wrap: break-word; }
+    .journal-entry.event .journal-text { color: #f2d9f7; }
     .settings-hint {
       font-size: 10px;
       color: rgba(224, 247, 252, 0.45);
@@ -553,13 +583,17 @@
       </div>
 
       <div class="settings-hint">
-        Try: "remind me in 20 minutes to stretch" · "list reminders" · "start pomodoro" · "remember that I'm a night owl" · "what do you remember" · "forget that" · "wear headphones" / "wear beanie" / "wear sunglasses" · "voice on" · "search the web for..." — she'll look it up instead of guessing, and she does it herself when she doesn't actually know · "check for updates" · Ctrl+Alt+E summons her from anywhere (also force-stops a pc task mid-run) · "use the pc: open calculator" · paste or drop an image, or hit ✂ to snip a piece of your screen and ask about it · "goodnight" and she closes herself · double-click me to pet 🖤
+        Try: "remind me in 20 minutes to stretch" · "list reminders" · "start pomodoro" · "remember that I'm a night owl" · "what do you remember" · "forget that" · "show my journal" · "wear headphones" / "wear beanie" / "wear sunglasses" · "voice on" · "search the web for..." — she'll look it up instead of guessing, and she does it herself when she doesn't actually know · "check for updates" · Ctrl+Alt+E summons her from anywhere (also force-stops a pc task mid-run) · "use the pc: open calculator" · paste or drop an image, or hit ✂ to snip a piece of your screen and ask about it · "goodnight" and she closes herself · double-click me to pet 🖤
       </div>
     </div>
 
     <div id="memory-modal">
       <h3>🗂️ what ellie remembers</h3>
       <div id="memory-list"></div>
+      <div id="journal-block">
+        <h4>📖 the journal — recent days</h4>
+        <div id="journal-list"></div>
+      </div>
       <div class="mem-add-row">
         <input type="text" id="mem-add-input" placeholder="remember something new..." maxlength="200" />
         <button id="mem-add-btn">＋</button>
@@ -567,7 +601,7 @@
       <div class="modal-actions">
         <button id="mem-close-btn">Close</button>
       </div>
-      <div class="settings-hint">★ = pinned — she treats these as core facts and they're saved when her memory overflows.</div>
+      <div class="settings-hint">★ = pinned — she treats these as core facts and they're saved when her memory overflows. the journal fills itself: what you say and what she does for you, day by day.</div>
     </div>
 
     <div id="update-modal">

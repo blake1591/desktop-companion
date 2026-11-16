@@ -197,6 +197,20 @@ const UI = (() => {
       }, 7200);
     }
 
+    // Day counter, hardcoded-greeting twin: milestones always land,
+    // ordinary days occasionally. Never on day one (she just met you).
+    const dayN = Memory.getDayCount();
+    if (dayN > 1 && !window.location.search.includes("autotest")) {
+      const milestone = [7, 14, 30, 50, 100, 180, 270, 365, 500, 1000].includes(dayN);
+      if (milestone || Math.random() < 0.15) {
+        setTimeout(() => {
+          say(milestone
+            ? `also... today is day ${dayN} of us. i keep count. 🖤`
+            : `day ${dayN} of ellie, by the way.`, { mood: "idle", holdMs: 7000 });
+        }, 12000);
+      }
+    }
+
     aiGreet(fallback);
   }
 
@@ -219,11 +233,13 @@ const UI = (() => {
       const seasonList = Assistant.seasonalLines ? Assistant.seasonalLines() : [];
       const hr = new Date().getHours();
       const dayPart = (hr >= 4 && hr < 12) ? "morning" : (hr < 17) ? "afternoon" : (hr < 23) ? "late night" : "middle of the night";
+      const dayN = Memory.getDayCount();
       const greetingPrompt = `[GREETING TASK] this is your very first appearance today — the moment ellie boots up and greets her person. compose THAT line.
 - one short sentence, lowercase, casual emo gremlin energy: warm but never sappy.
 - it must feel FRESH, like something you'd actually blurt — not a stock catchphrase you repeat every day. never open with "hey... welcome back".
 - never mention system stats (RAM/CPU/battery), never say anything technical about booting ("systems online" etc is banned).
 - you may nod to the time of day (it's ${dayPart})${seasonList.length ? ` or the season ("${seasonList.join("; ")}" — at most once, folded in naturally)` : ""}. if you know the user's name, use it.
+- it's day ${dayN} of you two running together${dayN <= 1 ? " (day one — brand new, never say the count)" : ` (${[7, 30, 50, 100, 180, 270, 365, 500, 1000].includes(dayN) ? "a milestone — a quiet proud mention is welcome" : "an ordinary day — never say the number, it gets stale"})`}.
 - reply with {"mood":"...","text":"..."} only — no "action", nothing remembered.`;
 
       const result = await Promise.race([
@@ -428,14 +444,63 @@ const UI = (() => {
     }
   }
 
-  function openMemoryPanel() {
+  // --- Journal view: recent days, read-only, newest first ---
+  function renderJournalList() {
+    const box = document.getElementById("journal-list");
+    if (!box) return;
+    box.innerHTML = "";
+    const days = Memory.getJournalDays(7);
+    if (!days.length) {
+      const empty = document.createElement("div");
+      empty.className = "mem-empty";
+      empty.textContent = "empty for now... talk to me and it fills itself in.";
+      box.appendChild(empty);
+      return;
+    }
+    const MONTHS = ["jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "oct", "nov", "dec"];
+    const dayOneLocal = (() => {
+      const d = new Date(Memory.getDayOne());
+      return [d.getFullYear(), d.getMonth() + 1, d.getDate()];
+    })();
+    for (const { day, entries } of days) {
+      const [y, m, d] = day.split("-").map(Number);
+      const dayOf = Math.round((Date.UTC(y, m - 1, d) -
+        Date.UTC(dayOneLocal[0], dayOneLocal[1] - 1, dayOneLocal[2])) / 86400000) + 1;
+
+      const wrap = document.createElement("div");
+      wrap.className = "journal-day";
+      const head = document.createElement("div");
+      head.className = "journal-day-head";
+      head.textContent = `${MONTHS[m - 1]} ${d}, ${y} · day ${dayOf} of ellie`;
+      wrap.appendChild(head);
+
+      for (const e of entries) {
+        const row = document.createElement("div");
+        row.className = "journal-entry" + (e.source === "event" ? " event" : "");
+        const time = document.createElement("span");
+        const t = new Date(e.at);
+        time.className = "journal-time";
+        time.textContent = `${String(t.getHours()).padStart(2, "0")}:${String(t.getMinutes()).padStart(2, "0")}`;
+        const text = document.createElement("span");
+        text.className = "journal-text";
+        text.textContent = (e.source === "event" ? "✦ " : "") + e.text;
+        row.appendChild(time);
+        row.appendChild(text);
+        wrap.appendChild(row);
+      }
+      box.appendChild(wrap);
+    }
+  }
+
+  function openMemoryPanel(openLine) {
     settingsModal.style.display = "none"; // never two panels stacked
     renderMemoryList();
+    renderJournalList();
     memAddInput.value = "";
     memoryModal.style.display = "block";
     memoryModal.scrollTop = 0;
     Orb.setMood("idle");
-    say("flipping through my memory book...", { mood: "idle", holdMs: 3000 });
+    say(openLine || "flipping through my memory book...", { mood: "idle", holdMs: 3000 });
   }
 
   function addFromPanel() {
@@ -650,8 +715,14 @@ const UI = (() => {
     }
 
     // Memory book: show / browse / manage
+    // Memory book / journal: show / browse / manage. The journal opens the
+    // same panel — it lives below the facts list.
     if (/^(show|open)\s+(my\s+|your\s+|the\s+)?(memories|memory book)$|^what do you (remember|know about me)$|^list (memories|my memories)$/.test(lower)) {
       openMemoryPanel();
+      return true;
+    }
+    if (/^(show|open|read)\s+(me\s+)?(my\s+|your\s+|the\s+)?journal\s*[?!.]*$|^what(?:'?s| is) in (?:my|your|the) journal\s*[?!.]*$|^journal\s*[?!.]*$/.test(lower)) {
+      openMemoryPanel("the journal's already open, actually. you talk, i write.");
       return true;
     }
 
@@ -941,16 +1012,30 @@ const UI = (() => {
         : "";
       const media = sysContext.nowPlaying || null;
       const msgBody = text || (images.length ? "(no words — just look at what i sent and react to it)" : "");
-      const promptWithContext = `[DESKTOP CONTEXT: Time=${sysContext.time}, Active App=${sysContext.activeApp} (window: "${sysContext.activeWindow}"), User Idle=${sysContext.idleSeconds}s, RAM=${sysContext.ramUsagePercent}%, CPU=${sysContext.cpuPercent}%, Battery=${Assistant.getBatteryPct() !== null ? Assistant.getBatteryPct() + "%" : "unknown"}, Now Playing=${media ? `${media.app} — "${media.title}"` : "nothing"}]\n\nUser message: ${msgBody}${imageNote}`;
 
       // Big automatic prompts (search results) record a short note in
       // history instead of the whole blob — the substance goes in the
-      // prompt, not the memory book
+      // prompt, not the memory book. Both paths also drop a line in the
+      // journal: the diary is what you actually said, day by day.
       if (opts.auto) {
-        Memory.addUser(text.length > 90 ? text.slice(0, 90) + "…" : text);
+        const histLine = text.length > 90 ? text.slice(0, 90) + "…" : text;
+        Memory.addUser(histLine);
+        Memory.journal(histLine, "chat");
       } else {
-        Memory.addUser(text + (images.length ? ` (+${images.length} image${images.length > 1 ? "s" : ""})` : ""));
+        const histLine = text + (images.length ? ` (+${images.length} image${images.length > 1 ? "s" : ""})` : "");
+        Memory.addUser(histLine);
+        Memory.journal(histLine, "chat");
       }
+
+      // "how was my day/week" and friends — she answers from her journal,
+      // not from guessing. The block rides into THIS prompt only, so it
+      // never bloats ordinary turns.
+      const journalBlock = /\b(?:how\s+(?:was|did|'d)\s+(?:my|the|our)\s+(?:day|week)|what\s+did\s+i\s+do\s+(?:today|yesterday|this\s+week|last\s+week|lately)|what\s+happened\s+(?:today|this\s+week)|catch\s+me\s+up|what\s+did\s+we\s+(?:talk\s+about|do|cover)\s*(?:today|this\s+week)?)\b/i.test(text)
+        ? Memory.getJournalBlock(7) : "";
+      const journalCtx = journalBlock
+        ? `\n\n[THE USER IS ASKING ABOUT THEIR RECENT DAYS — this is your own journal of what they said and what you did together. Answer from it, naturally, in your voice — never recite the list]\n${journalBlock}`
+        : "";
+      const promptWithContext = `[DESKTOP CONTEXT: Time=${sysContext.time}, Active App=${sysContext.activeApp} (window: "${sysContext.activeWindow}"), User Idle=${sysContext.idleSeconds}s, RAM=${sysContext.ramUsagePercent}%, CPU=${sysContext.cpuPercent}%, Battery=${Assistant.getBatteryPct() !== null ? Assistant.getBatteryPct() + "%" : "unknown"}, Now Playing=${media ? `${media.app} — "${media.title}"` : "nothing"}, Day=${Memory.getDayCount()} of us]\n\nUser message: ${msgBody}${imageNote}${journalCtx}`;
       const messages = LLM.buildMessages(promptWithContext);
 
       let firstTextLogged = false;

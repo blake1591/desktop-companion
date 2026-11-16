@@ -174,6 +174,8 @@ const Assistant = (() => {
       const pretty = formatDelay(secs);
       await scheduleReminder({ delaySeconds: secs, note: action.note || "something", kind: action.type });
       const shown = action.note && String(action.note).trim() ? `"${String(action.note).trim()}"` : "your timer";
+      // Diary: scheduled asks are part of the day, not just chat noise
+      Memory.journal(`asked her for a ${action.type} — ${shown} in ${pretty}`, "event");
       UI.say(`scheduled. i'll ping you about ${shown} in ${pretty}.`, { mood: "idle", holdMs: 7000, speak: true });
       return;
     }
@@ -184,7 +186,9 @@ const Assistant = (() => {
       } else if (isPomodoroRunning()) {
         UI.say(`we already have a pomodoro going — ${getPomodoroStatus()}. say 'stop pomodoro' if you want it off.`, { mood: "confused", holdMs: 7000 });
       } else {
-        startPomodoro(typeof action.note === "string" ? action.note : "");
+        const note = typeof action.note === "string" ? action.note : "";
+        Memory.journal(`started a pomodoro${note ? ` — ${note}` : ""}`, "event");
+        startPomodoro(note);
       }
       return;
     }
@@ -220,6 +224,8 @@ const Assistant = (() => {
         return;
       }
       UI.say("taking over. watch the little bubble — that's me narrating every move.", { mood: "happy", holdMs: 7000, speak: true });
+      // Diary: pc tasks are the days she was hands-on
+      Memory.journal(`she took the wheel: ${goal}`, "event");
       startComputerTask(goal);
       return;
     }
@@ -233,6 +239,8 @@ const Assistant = (() => {
         return;
       }
       UI.runWebSearch(query);
+      // Diary: the things you had her chase down today
+      Memory.journal(`asked her to look up: ${query}`, "event");
       return;
     }
 

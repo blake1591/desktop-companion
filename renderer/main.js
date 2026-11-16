@@ -46,6 +46,15 @@
             probes.push(["block-★", block.includes("e2e test memory edited ★") && block.includes("pinned")]);
             probes.push(["forget-that", Memory.removeMemory("e2e test memory edited")]);
             probes.push(["forget-fail-safe", !Memory.getMemories().some(x => x.text.includes("e2e test"))]);
+            // Journal engine: write → appears in the prompt block → day
+            // counter sane → wipe clean
+            probes.push(["journal-write", Memory.journal("e2e journal entry", "chat")]);
+            probes.push(["journal-dedupe", Memory.journal("e2e journal entry", "chat") === false]);
+            probes.push(["journal-block", Memory.getJournalBlock(7).includes("e2e journal entry")]);
+            probes.push(["journal-days", Memory.getJournalDays(7).some(g => g.entries.some(e => e.text === "e2e journal entry"))]);
+            probes.push(["day-count", typeof Memory.getDayCount() === "number" && Memory.getDayCount() >= 1]);
+            Memory.wipeJournal();
+            probes.push(["journal-wiped", Memory.getJournalDays(7).length === 0]);
             console.log("[autotest] memory probes: " + probes.map(p => `${p[0]}=${p[1] ? "ok" : "FAIL"}`).join(" "));
             const box = document.getElementById("input-box");
             box.value = "show memories";
